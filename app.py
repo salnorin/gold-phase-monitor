@@ -183,7 +183,7 @@ else:
 
   st.divider()
 
-  # 📈 چارت تعاملی قیمت و باندهای بولینگر (با قابلیت زوم دقیق برای بررسی نقاط برخورد)
+  # 📈 چارت تعاملی قیمت و باندهای بولینگر
   st.subheader(
       "📈 نمودار تعاملی قیمت، باندهای بولینگر و نقاط برخورد (آخرین ۱۲۰ کندل)"
   )
@@ -191,7 +191,6 @@ else:
   chart_data = data.tail(120)
   fig_price = go.Figure()
 
-  # خط اصلی قیمت
   fig_price.add_trace(
       go.Scatter(
           x=chart_data.index,
@@ -202,7 +201,6 @@ else:
       )
   )
 
-  # باند بالایی بولینگر
   fig_price.add_trace(
       go.Scatter(
           x=chart_data.index,
@@ -213,7 +211,6 @@ else:
       )
   )
 
-  # باند پایینی بولینگر
   fig_price.add_trace(
       go.Scatter(
           x=chart_data.index,
@@ -224,7 +221,6 @@ else:
       )
   )
 
-  # نقطه‌گذاری سیگنال‌های شورت (تله نهنگ) روی چارت
   shorts = chart_data[chart_data["Slaughter_Zone"]]
   if not shorts.empty:
     fig_price.add_trace(
@@ -237,7 +233,6 @@ else:
         )
     )
 
-  # نقطه‌گذاری سیگنال‌های لانگ (کف حمایتی) روی چارت
   longs = chart_data[chart_data["Long_Zone"]]
   if not longs.empty:
     fig_price.add_trace(
@@ -293,9 +288,19 @@ else:
   st.subheader("📋 سابقه سیگنال‌های کمّی و نتایج آن‌ها")
   history_df = data[data["Signal_Attempted"] == 1].tail(10)
   if not history_df.empty:
-    tbl = pd.DataFrame({
+    tbl_data = {
         "زمان": history_df.index.strftime("%m-%d %H:%M"),
         "قیمت": history_df["Close"].round(2),
         "نوع سیگنال": history_df["Signal_Type"],
-        "RSI": history_df["RSI"].round
-        
+        "RSI": history_df["RSI"].round(1),
+        "نتیجه (۵ کندل بعد)": np.where(
+            history_df["Signal_Success"] == 1,
+            "✅ موفق (هدف محقق شد)",
+            "❌ ناموفق",
+        ),
+    }
+    tbl = pd.DataFrame(tbl_data)
+    st.dataframe(tbl, use_container_width=True)
+  else:
+    st.write("هنوز سیگنالی در این بازه ثبت نشده است.")
+      
