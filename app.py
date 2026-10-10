@@ -5,16 +5,20 @@ import streamlit as st
 import yfinance as yf
 
 # تنظیمات صفحه وب
-st.set_page_config(page_title="مدار ۴بعدی و ارگانیسم زنده طلا", layout="wide")
-st.title("🧬 مانیتورینگ ارگانیک طلا + موجود زنده‌ی فاز بازار")
-st.write("سیستم بیولوژیک طلا: از تنفس بازار تا حالت‌های زنده و احساسیِ ارگانیسم.")
+st.set_page_config(page_title="مدار معاملاتی زنده طلا (4D)", layout="wide")
+st.title("🧬 مانیتورینگ زنده و پنل عملیاتی سیگنال‌های طلا (XAU/USD)")
+st.write(
+    "سیستم بیولوژیک ریل‌تایم: تشخیص تله نهنگ‌ها، تعیین پوزیشن (Long/Short) و"
+    " سطوح مدیریت ریسک."
+)
 
 
-# بارگذاری و پردازش مدل ارگانیک
-@st.cache_data
-def load_organic_market_model():
+# بارگذاری داده‌های ریل‌تایم (تایم‌فریم ساعتی برای رصد زنده)
+@st.cache_data(ttl=600)  # هر 10 دقیقه به‌روز می‌شود
+def load_realtime_market_data():
   try:
-    raw_data = yf.download("GC=F", start="2024-01-01", progress=False)
+    # دریافت داده‌های ۶۰ روز اخیر با کندل‌های ۱ ساعته (کاملاً ریل‌تایم و دقیق)
+    raw_data = yf.download("GC=F", period="60d", interval="1h", progress=False)
     if raw_data.empty:
       return None
 
@@ -25,17 +29,17 @@ def load_organic_market_model():
     df["Close"] = raw_data["Close"].iloc[:, 0]
     df["Volume"] = raw_data["Volume"].iloc[:, 0]
 
-    # ۱. شعاع تنفسی (Volatility)
+    # ۱. شعاع تنفسی و نوسان (Volatility)
     df["Volatility"] = (df["High"] - df["Low"]) / df["Close"]
     df["Breath_Radius"] = df["Volatility"].rolling(window=12).mean() * 1000
 
-    # ۲. خواب بازار و بیداری مؤسسات
+    # ۲. خواب بازار (اسکلوژن مؤسساتی)
     vol_baseline = df["Volatility"].rolling(window=50).mean()
     df["Is_Asleep"] = df["Volatility"] < (vol_baseline * 0.75)
 
-    # ۳. منطقه کشتار نهنگ‌ها (Slaughter Zone)
+    # ۳. منطقه کشتار نهنگ‌ها (تله FOMO)
     avg_volume = df["Volume"].rolling(window=20).mean()
-    df["Retail_FOMO"] = (df["Volume"] > (avg_volume * 1.4)) & (
+    df["Retail_FOMO"] = (df["Volume"] > (avg_volume * 1.35)) & (
         df["Close"] > df["Open"]
     )
     max_radius = df["Breath_Radius"].quantile(0.88)
@@ -43,14 +47,34 @@ def load_organic_market_model():
         df["Retail_FOMO"]
     )
 
-    # ۴. اعتبارسنجی سیگنال‌ها (۵ کندل بعد)
+    # ۴. تعیین جهت پوزیشن و مدیریت ریسک
+    # در منطقه کشتار، چون نهنگ‌ها در اوج خالی می‌کنند، سیگنال «شورت (فروش)» صادر می‌شود
+    df["Signal_Type"] = np.where(
+        df["Slaughter_Zone"],
+        "🔴 SHORT (فروش / تخلیه نهنگ)",
+        np.where(
+            df["Is_Asleep"],
+            "🟢 آماده‌باش / انباشت پنهان",
+            "⚪ عادی / گردش نقدینگی",
+        ),
+    )
+
+    # محاسبه حد سود (TP) و حد ضرر (SL) پویا بر اساس نوسان
+    df["Stop_Loss"] = np.where(
+        df["Slaughter_Zone"], df["High"] + (df["Close"] * 0.003), 0
+    )
+    df["Take_Profit"] = np.where(
+        df["Slaughter_Zone"], df["Close"] - (df["Close"] * 0.007), 0
+    )
+
+    # ۵. اعتبارسنچی موفقیت سیگنال (۵ کندل بعد)
     df["Future_Return_5C"] = df["Close"].shift(-5) - df["Close"]
     df["Signal_Success"] = np.where(
         df["Slaughter_Zone"] & (df["Future_Return_5C"] < 0), 1, 0
     )
     df["Signal_Attempted"] = np.where(df["Slaughter_Zone"], 1, 0)
 
-    # ۵. ابعاد مومنتوم و زمان
+    # ۶. ابعاد مومنتوم و زمان
     df["Returns"] = df["Close"].pct_change()
     df["Theta"] = df["Returns"].cumsum() * 25
     df["Z_Time"] = np.arange(len(df))
@@ -61,39 +85,46 @@ def load_organic_market_model():
     return None
 
 
-data = load_organic_market_model()
+data = load_realtime_market_data()
 
 if data is None or data.empty:
-  st.error("خطا در دریافت داده‌ها. لطفاً صفحه را رفرش کنید.")
+  st.error(
+      "خطا در دریافت داده‌های زنده. لطفاً چند لحظه دیگر صفحه را رفرش کنید."
+  )
 else:
-  # وضعیت لحظه‌ای آخرین کندل برای موجود زنده
+  # آخرین وضعیت کندل زنده بازار
   latest = data.iloc[-1]
+  latest_time = data.index[-1].strftime("%m-%d %H:%M")
 
-  # تعیین حالت، قیافه و رنگ موجود زنده بازار بر اساس شرایط فیزیولوژیک
+  # تعیین موجود زنده بازار
   if latest["Slaughter_Zone"]:
     creature_emoji = "👹⚡"
-    creature_name = "«بَزکوهیِ خونخوار / کمین نهنگ»"
+    creature_name = "«بزکوهیِ خونخوار / تله نهنگ فعال!»"
     creature_mood = (
-        "عصبانی و در حال درویدنِ ریتل‌ها! بازار در منطقه کشتار است."
+        "بازار در اوج هیجان کاذب است. نهنگ‌ها در حال توزیع و شکار پوزیشن‌های"
+        " خریدِ خرده‌پاها هستند."
     )
     bg_color = "rgba(255, 0, 85, 0.15)"
     border_color = "#ff0055"
   elif latest["Is_Asleep"]:
     creature_emoji = "💤🐼"
-    creature_name = "«تپلوِ خواب‌آلود / خرپف ممتد»"
+    creature_name = "«تپلوِ خواب‌آلود / سکوت مؤسساتی»"
     creature_mood = (
-        "در خواب عمیقِ سکوت است. مؤسسات دارند در تاریکی انباشت می‌کنند."
+        "بازار در خوابِ نوسان است؛ مؤسسات در پشت صحنه در حال انباشت پنهان"
+        " هستند."
     )
     bg_color = "rgba(0, 255, 204, 0.1)"
     border_color = "#00ffcc"
   else:
     creature_emoji = "✨🦊"
-    creature_name = "«روباهِ هوشیار / تنفس طبیعی»"
-    creature_mood = "سر حال، در حال تنفس و هدایت جریان نقدینگی در بافت بازار."
+    creature_name = "«روباهِ هوشیار / تنفس روان»"
+    creature_mood = (
+        "جریان نقدینگی به آرامی در بافت ارگانیسم در حال گردش و تنفس است."
+    )
     bg_color = "rgba(0, 180, 255, 0.1)"
     border_color = "#00b4ff"
 
-  # نمایش کارت متحرک موجود زنده بازار با CSS
+  # نمایش کارت موجود زنده
   st.markdown(
       f"""
     <style>
@@ -109,121 +140,32 @@ else:
         border-radius: 15px;
         text-align: center;
         animation: pulse-anim 2s infinite;
-        margin-bottom: 25px;
+        margin-bottom: 20px;
     }}
-    .creature-emoji {{
-        font-size: 55px;
-    }}
-    .creature-title {{
-        font-size: 19px;
-        font-weight: bold;
-        color: #ffffff;
-        margin-top: 8px;
-    }}
-    .creature-desc {{
-        font-size: 14px;
-        color: #dddddd;
-        margin-top: 5px;
-    }}
+    .creature-emoji {{ font-size: 50px; }}
+    .creature-title {{ font-size: 18px; font-weight: bold; color: #ffffff; margin-top: 5px; }}
+    .creature-desc {{ font-size: 13px; color: #dddddd; margin-top: 5px; }}
     </style>
     <div class="creature-box">
         <div class="creature-emoji">{creature_emoji}</div>
-        <div class="creature-title">موجود زنده بازار: {creature_name}</div>
-        <div class="creature-desc">وضعیت فیزیولوژیک: {creature_mood}</div>
+        <div class="creature-title">وضعیت زنده ارگانیسم: {creature_name}</div>
+        <div class="creature-desc">{creature_mood} (آخرین بروزرسانی کندل: {latest_time})</div>
     </div>
     """,
       unsafe_allow_html=True,
   )
 
-  # متریک‌های کلیدی وین‌ریت
-  total_signals = data["Signal_Attempted"].sum()
-  successful_signals = data["Signal_Success"].sum()
-  win_rate = (
-      (successful_signals / total_signals * 100) if total_signals > 0 else 0
-  )
-
-  col1, col2, col3 = st.columns(3)
-  col1.metric("کل سیگنال‌ها", int(total_signals))
-  col2.metric("سیگنال‌های موفق", int(successful_signals))
-  col3.metric("دقت سیستم (Win Rate)", f"{win_rate:.1f}%")
-
-  st.divider()
-
-  # جدول سیگنال‌ها
-  st.subheader("📋 جدول نقاط عطف و سیگنال‌های ورود/خروج")
-  recent_events = data[data["Slaughter_Zone"] | data["Is_Asleep"]].tail(8)
-  signal_table = pd.DataFrame({
-      "زمان": recent_events.index.strftime("%m-%d %H:%M"),
-      "قیمت طلا": recent_events["Close"].round(2),
-      "وضعیت فاز ارگانیسم": np.where(
-          recent_events["Slaughter_Zone"],
-          "⚠️ Slaughter Zone (تله نهنگ)",
-          "💤 خواب بازار (انباشت)",
-      ),
-      "نتیجه تست": np.where(
-          recent_events["Signal_Success"] == 1, "✅ تایید شد", "⏳ در حال بررسی"
-      ),
-  })
-  st.dataframe(signal_table, use_container_width=True)
-
-  st.divider()
-
-  # نماهای دوبعدی تخصصی برای موبایل
-  st.subheader("📈 تحلیل ابعاد تفکیک‌شده بازار")
-  st.write("**۱. بعد قیمت و زمان (Price Action):**")
-  st.line_chart(data["Close"].tail(120))
-
-  st.write("**۲. بعد شعاع تنفسی و نوسان (Breath Radius):**")
-  st.line_chart(data["Breath_Radius"].tail(120))
-
-  st.write("**۳. بعد مومنتوم جریان سرمایه (Momentum Theta):**")
-  st.line_chart(data["Theta"].tail(120))
-
-  st.divider()
-
-  # مدار ۳بعدی
-  st.subheader("🌐 مدار جامع ۳بعدی فازسنج طلا")
-  normal_data = data[~data["Slaughter_Zone"]]
-  slaughter_data = data[data["Slaughter_Zone"]]
-
-  X_norm = normal_data["Breath_Radius"] * np.cos(normal_data["Theta"])
-  Y_norm = normal_data["Breath_Radius"] * np.sin(normal_data["Theta"])
-  Z_norm = normal_data["Z_Time"]
-
-  X_slg = slaughter_data["Breath_Radius"] * np.cos(slaughter_data["Theta"])
-  Y_slg = slaughter_data["Breath_Radius"] * np.sin(slaughter_data["Theta"])
-  Z_slg = slaughter_data["Z_Time"]
-
-  fig = go.Figure()
-  fig.add_trace(
-      go.Scatter3d(
-          x=X_norm,
-          y=Y_norm,
-          z=Z_norm,
-          mode="lines",
-          line=dict(color="#00ffcc", width=3),
-          name="مسیر تنفسی ارگانیسم",
-      )
-  )
-  if not slaughter_data.empty:
-    fig.add_trace(
-        go.Scatter3d(
-            x=X_slg,
-            y=Y_slg,
-            z=Z_slg,
-            mode="markers",
-            marker=dict(size=6, color="#ff0055", symbol="diamond"),
-            name="⚠️ منطقه کشتار نهنگ‌ها",
-        )
+  # 🚨 پنل سیگنال عملیاتی لحظه‌ای برای ترید
+  st.subheader("🎯 فرمان لحظه‌ای ترید و مدیریت ریسک")
+  if latest["Slaughter_Zone"]:
+    st.error(
+        f"🚨 **سیگنال فعال (SHORT / فروش):** قیمت در مقاومت حیاتی و تله نهنگ"
+        f" قرار دارد!\n\n"
+        f"* **قیمت ورود پیشنهادی:** `{latest['Close']:.2f}`\n"
+        f"* **حد ضرر (Stop Loss):** `{latest['Stop_Loss']:.2f}`\n"
+        f"* **حد سود (Take Profit):** `{latest['Take_Profit']:.2f}`"
     )
-
-  fig.update_layout(
-      scene=dict(
-          xaxis_title="فاز افقی (X)",
-          yaxis_title="فاز عمودی (Y)",
-          zaxis_title="زمان (Z)",
-      ),
-      margin=dict(l=0, r=0, b=0, t=20),
-      height=500,
-  )
-  st.plotly_chart(fig, use_container_width=True)
+  elif latest["Is_Asleep"]:
+    st.info(
+        "💤 **وضعیت ان
+      
