@@ -1,33 +1,83 @@
+import numpy as np
+
+
+class OrganicObserver:
+
+  @staticmethod
+  def observe_and_synthesize(latest_row, historical_win_rate):
+    motor_drive = latest_row.get("Motor_Drive", 0.0)
+    atp = latest_row.get("ATP_Energy", 100.0)
+    optical_pull = latest_row.get("Optical_Pull", 0.0)
+    light_source = latest_row.get("Optical_Light_Source", 0.0)
+    breath = latest_row.get("Weighted_Breath", 1.0)
+    viral_fever = latest_row.get("Viral_Fever", False)
+
+    plasticity = (
+        historical_win_rate / 100.0 if historical_win_rate > 0 else 0.5
+    )
+
+    latent_tensor = np.tanh(
+        (breath - 1.0) * (plasticity * 2.0)
+        + (optical_pull * 0.8)
+        - ((100.0 - atp) * 0.02)
+        + (0.4 if viral_fever else 0.0)
+    )
+
+    if atp < 35.0:
+      conviction = "هشدار نوری: ارگانیسم با کمبود شدید انرژی (ATP) روبه‌روست؛ نور نقدینگی دیده می‌شود اما قدرت شنا کردن به سمت آن وجود ندارد (توقف و ریکاوری)"
+    elif latent_tensor > 0.35:
+      conviction = (
+          "شهود اپتیکی: ارگانیسم منبع نور نقدینگی را رصد کرده و با انرژی کافی به"
+          " سوی آن شنا می‌کند"
+      )
+    else:
+      conviction = (
+          "شهود اپتیکی: تلاطم نوری در تعادل است؛ سیستم در حال پایش فتون‌های"
+          " نقدینگی است"
+      )
+
+    return plasticity, latent_tensor, conviction
+
+
 class BiologicalAIAnalyst:
 
   @staticmethod
-  def generate_diagnostic(latest_row):
-    sleep_hours = int(latest_row.get("Sleep_Streak", 0))
+  def generate_diagnostic(latest_row, historical_win_rate=50.0):
+    atp = latest_row.get("ATP_Energy", 100.0)
+    light_source = latest_row.get("Optical_Light_Source", 0.0)
+    optical_pull = latest_row.get("Optical_Pull", 0.0)
 
-    if latest_row["Slaughter_Zone"]:
+    plasticity, tensor, conviction = (
+        OrganicObserver.observe_and_synthesize(latest_row, historical_win_rate)
+    )
+
+    if atp < 35.0:
       return f"""
-            * **🔥 کالبدشکافی تله نهنگ (Short):** شعاع تنفسی ارگانیسم (`{latest_row['Breath_Radius']:.1f}`) به اوج انبساط رسیده است. ریتل‌ها (گله) به دلیلِ روند صعودیِ قبل، دچار عادت و امنیتِ کاذب شده بودند و حالا در دامِ FOMO افتاده‌اند. نهنگ‌ها دقیقاً در این نقطه در حال تخلیه بار روی سر بازارند.
-            * **🎯 هدف قیمتی ریزش:** با توجه به بازگشت تنفس ارگانیسم، انتظار می‌رود قیمت تا سطح حمایت بیولوژیک یعنی **`{latest_row['Target_Price']:.2f}`** اصلاح کند و بریزد.
-            * **🛡️ مدیریت ریسک:** ورود به فروش در `{latest_row['Close']:.2f}` با حد ضرر در `{latest_row['Stop_Loss']:.2f}`.
+            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
+            * **وضعیت انرژی نوری:** سطح ATP به شدت افت کرده (`{atp:.1f}%`). ارگانیسم منبع نور نقدینگی را در قیمت `{light_source:.2f}` می‌بیند، اما چون **انرژی (نفس) ندارد**، از شنا کردن به سمت آن منصرف شده و در حال ریکاوری است.
+            * **تنسور جعبه سیاه:** `{tensor:.2f}` -> {conviction}
+            * **📍 فرمان:** استراحت مطلق و خودداری از ورود به پوزیشن تا زمان شارژ شدن انرژی.
             """
-    elif latest_row["Long_Zone"]:
+
+    if latest_row.get("Slaughter_Zone", False) or tensor < -0.3:
       return f"""
-            * **🦅 کالبدشکافی بیداری و جهش (Long):** ارگانیسم پس از یک دوره‌ی طولانیِ رکود، اکنون سر از خواب برداشته است. این جهش، ساختارِ عادتِ خسته‌کننده‌ی قبلی را می‌شکند و با چرخش مومنتوم تتا ($\Theta$)، جریان خونِ جدیدی وارد رگ‌های بازار می‌شود.
-            * **🎯 هدف قیمتی صعود:** هدف نهایی این موجِ انباشت تا محدوده **`{latest_row['Target_Price']:.2f}`** محاسبه شده است.
-            * **🛡️ مدیریت ریسک:** ورود به خرید در `{latest_row['Close']:.2f}` با حد ضرر در کف حمایتی `{latest_row['Stop_Loss']:.2f}`.
+            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
+            * **نور فریبنده نقدینگی:** ارگانیسم نوری را در سطح `{light_source:.2f}` رصد کرده است، اما سیستم اپتیکی و رسپتورها تشخیص داده‌اند که این نور، یک **تله نوری (سراب ناشی از تب ویروسی نهنگ)** است.
+            * **تنسور جعبه سیاه (`Latent Tensor`):** `{tensor:.2f}` -> **{conviction}**
+            * **📍 فرمان نقطه‌زن بیولوژیک:** شلیک پوزیشن **SHORT (فروش)** در قیمت `{latest_row['Close']:.2f}` | **حد ضرر:** `{latest_row['Stop_Loss']:.2f}` | **تارگت ریزش:** `{latest_row['Target_Price']:.2f}`
             """
-    elif latest_row["Is_Asleep"]:
-      habit_desc = (
-          f"این موجودِ زنده حدود **{sleep_hours} ساعت** است که در خوابِ عمیق"
-          " به سر می‌برد."
-          if sleep_hours > 1
-          else "ارگانیسم تازه به فاز خواب رفته است."
-      )
+
+    elif latest_row.get("Long_Zone", False) or tensor > 0.3:
       return f"""
-            * **💤 کالبدشکافی خواب و تشکیل عادت:** {habit_desc} جامعه‌ی معامله‌گران به این سکوت و نوسانِ مرده **عادت کرده‌اند** و تنفس جامعه کند شده است. این رخوتِ عمومی دقیقاً همان ابزاری است که مؤسسات از آن برای «انباشت پنهان» در تاریکی استفاده می‌کنند. هیچ فرمان عجولانه‌ای صادر نمی‌شود تا زمانی که شوکِ بعدی ارگانیسم را بیدار کند.
+            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
+            * **نور واقعی نقدینگی:** ارگانیسم با انرژی کامل (`ATP: {atp:.1f}%`) منبع نورِ نقدینگی در قیمت `{light_source:.2f}` را شناسایی کرده و به سمت آن شیرجه زده است.
+            * **تنسور جعبه سیاه (`Latent Tensor`):** `{tensor:.2f}` -> **{conviction}**
+            * **📍 فرمان نقطه‌زن بیولوژیک:** شلیک پوزیشن **LONG (خرید)** در قیمت `{latest_row['Close']:.2f}` | **حد ضرر:** `{latest_row['Stop_Loss']:.2f}` | **تارگت صعود:** `{latest_row['Target_Price']:.2f}`
             """
+
     else:
-      return """
-            * **✨ پویایی جریان خون:** جریان نقدینگی با ریتم طبیعی و روان در بافت بازار در حال گردش است. ارگانیسم در تعادل زیستی قرار دارد و تله یا جهش خاصی ثبت نشده است.
+      return f"""
+            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
+            * منبع نوری فعلی: `{light_source:.2f}` | کشش نوری (`Optical Pull`): `{optical_pull:.2f}` | انرژی ATP: `{atp:.1f}%`. سیستم بینایی در حال اسکن نقدینگی‌های تاریک بازار است.
             """
       
