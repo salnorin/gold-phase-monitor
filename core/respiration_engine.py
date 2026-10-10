@@ -27,7 +27,7 @@ class RespirationEngine:
       df['High'] = raw['High'].iloc[:, 0]
       df['Low'] = raw['Low'].iloc[:, 0]
       df['Close'] = raw['Close'].iloc[:, 0]
-      df['Volume'] = raw['Volume'].iloc[:, 0]
+      df['Volume'] = raw.get('Volume', pd.Series(0, index=raw.index)).iloc[:, 0]
 
       # ۱. شعاع تنفسی (Breath Radius)
       df['Volatility'] = (df['High'] - df['Low']) / df['Close']
@@ -38,9 +38,16 @@ class RespirationEngine:
       df['Theta'] = df['Returns'].cumsum() * 50
       df['Z_Time'] = np.arange(len(df))
 
-      # ۳. فاز خواب ارگانیسم
+      # ۳. فاز خواب ارگانیسم و محاسبه طول مدت خواب (Habit / Sleep Streak)
       radius_baseline = df['Breath_Radius'].rolling(window=40).mean()
       df['Is_Asleep'] = df['Breath_Radius'] < (radius_baseline * 0.75)
+
+      # محاسبه تعداد کندل‌های متوالی که ارگانیسم خواب بوده (تشکیل عادت)
+      df['Sleep_Streak'] = (
+          df['Is_Asleep']
+          .groupby((~df['Is_Asleep']).cumsum())
+          .cumsum()
+      )
 
       # ۴. منطقه کشتار نهنگ‌ها (Short) و جهش انباشت (Long)
       high_radius = df['Breath_Radius'].quantile(0.85)
@@ -74,7 +81,7 @@ class RespirationEngine:
       df['Future_Return_5C'] = df['Close'].shift(-5) - df['Close']
       df['Signal_Success'] = np.where(
           (df['Slaughter_Zone'] & (df['Future_Return_5C'] < 0))
-          | (df['Long_Zone'] & (df["Future_Return_5C"] > 0)),
+          | (df['Long_Zone'] & (df['Future_Return_5C'] > 0)),
           1,
           0,
       )
@@ -82,7 +89,7 @@ class RespirationEngine:
           df['Slaughter_Zone'] | df['Long_Zone'], 1, 0
       )
 
-      df.dropna(subset=['Close', 'Volume'], inplace=True)
+      df.dropna(subset=['Close'], inplace=True)
       return df
     except Exception:
       return None
