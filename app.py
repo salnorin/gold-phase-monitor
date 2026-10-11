@@ -268,8 +268,8 @@ def crypto_ticker(product):
 @st.cache_data(ttl=8, show_spinner=False)
 def paxg_price():
     """PAXG-USD — قیمت یگانه‌ی طلا (core.gold_price). باز بودن بازار را GC=F/ساعات CME تعیین می‌کند، نه PAXG."""
-    from core import gold_price
-    return gold_price.ticker()
+    from core import fastpath
+    return fastpath.paxg_price()[0]          # Go fast path if running locally, else Python (Coinbase → Kraken)
 
 
 @st.cache_data(ttl=10, show_spinner=False)
