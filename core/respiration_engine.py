@@ -101,8 +101,8 @@ class RespirationEngine:
             0,
         )
 
-        df.fillna(method="bfill", inplace=True)
-        df.fillna(0, inplace=True)
+        df = df.bfill()
+        df = df.fillna(0)
         df.dropna(subset=["Close"], inplace=True)
         return df
 
@@ -116,3 +116,4 @@ class RespirationEngine:
         if df is None:
             return None
         return self.process_respiration(df)
+        
