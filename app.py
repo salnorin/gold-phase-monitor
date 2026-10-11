@@ -122,7 +122,8 @@ live = st.sidebar.checkbox(T("auto"), value=True)
 
 @st.cache_data(ttl=240, show_spinner=False)
 def get_data(interval):
-    raw = load("GC=F", interval)
+    from core import gold_price
+    raw = gold_price.candles(interval, 3000)        # PAXG-USD: قیمت یگانه‌ی طلا
     try:
         cross = load("SI=F", interval)
     except Exception:
@@ -265,14 +266,16 @@ def crypto_ticker(product):
 
 @st.cache_data(ttl=8, show_spinner=False)
 def paxg_price():
-    """PAXG-USD (توکن طلا روی Coinbase، ۲۴/۷) — قیمت سریع و جایگزین؛ آتی طلا نیست و باز بودن بازار طلا را تعیین نمی‌کند."""
-    return crypto_ticker("PAXG-USD")
+    """PAXG-USD — قیمت یگانه‌ی طلا (core.gold_price). باز بودن بازار را GC=F/ساعات CME تعیین می‌کند، نه PAXG."""
+    from core import gold_price
+    return gold_price.ticker()
 
 
 @st.cache_data(ttl=50, show_spinner=False)
 def gold_minutes_all():
+    from core import gold_price
     try:
-        return load("GC=F", "1m")
+        return gold_price.candles("1m", 120)
     except Exception:
         return None
 
@@ -392,14 +395,9 @@ def live_panel():
                            rr=MANUAL_TEST_RR if manual else None)
     acc.update(feat, j, awake)
     paxg = paxg_price()
-    price_src = T("src_gc")
-    if mins is not None:
-        price = float(mins["Close"].iloc[-1])
-    elif paxg:
-        price, price_src = paxg, T("src_paxg")
-    else:
-        price = float(last.close)
-    prev = float(mins["Close"].iloc[-2]) if mins is not None and len(mins) > 1 else price
+    fut = float(mins["Close"].iloc[-1]) if mins is not None else None      # GC=F فقط مرجع
+    price = paxg if paxg else float(last.close)
+    prev = st.session_state.get("paxg", price) or price
     pos = acc.state["position"]
     unreal = 0.0
     if pos:
@@ -446,15 +444,12 @@ def live_panel():
                     unsafe_allow_html=True)
     with c2:
         a, b, c = st.columns(3)
-        a.metric(T("gold_1m"), f"{price:,.2f}", f"{price - prev:+.2f}")
+        a.metric(T("gold_main"), f"{price:,.2f}", f"{price - prev:+.2f}")
         b.metric(T("live_acc"), f"{acc.equity + unreal:,.2f}", f"{(acc.equity + unreal) / acc.state['start_equity'] - 1:+.2%}")
         c.metric(T("open_pnl"), f"{unreal:+,.2f}" if pos else "—", f"{unreal:+.2f}" if pos else None)
-        old_px = st.session_state.get("paxg", paxg)
-        st.metric(T("paxg"), f"{paxg:,.2f}" if paxg else "—",
-                  f"{paxg - old_px:+.2f}" if paxg and old_px else None)
         st.session_state["paxg"] = paxg
-        if paxg and mins is not None:
-            st.caption(T("paxg_note", d=paxg - price, p=paxg / price - 1, src=price_src))
+        if fut and paxg:
+            st.caption(T("fut_ref", f=fut, d=fut - paxg, p=fut / paxg - 1))
         x, y, z = st.columns(3)
         btc, eth = crypto_ticker("BTC-USD"), crypto_ticker("ETH-USD")
         old_btc, old_eth = st.session_state.get("btc", btc), st.session_state.get("eth", eth)

@@ -37,6 +37,9 @@ def load(symbol, interval, csv_dir=None):
     path = os.path.join(csv_dir, f"{symbol}_{interval}.csv") if csv_dir else None
     if path and os.path.exists(path):
         df = pd.read_csv(path, index_col=0)
+    elif symbol in ("PAXG-USD", "GOLD"):
+        from core import gold_price
+        return gold_price.candles(interval, 13_000 if interval == "1h" else 3000)
     else:
         import yfinance as yf
         df = yf.download(symbol, period=PERIOD[interval], interval=interval, progress=False, auto_adjust=True)

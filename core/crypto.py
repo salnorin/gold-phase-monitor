@@ -19,7 +19,7 @@ from core.organism import BiologicalOrganism
 
 PRODUCTS = ("BTC-USD", "ETH-USD")
 PUBLIC_URL = "https://api.exchange.coinbase.com/products/{p}/candles"
-GRAN = {"1h": 3600, "15m": 900, "5m": 300}
+GRAN = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "6h": 21600}
 SECRET_PATH = os.path.expanduser("~/.secrets/coinbase_cdp.json")
 
 from core.config import MAX_RISK_PER_TRADE
