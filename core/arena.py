@@ -84,7 +84,55 @@ def counterfactual_table(df, cm: CostModel):
     return juice, at
 
 
-def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, risk_cap=None, kill_equity=None, cf=None):
+def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, risk_cap=None, kill_equity=None, cf=None,
+                        backend=None):
+    """backend: None/auto → native Rust (gpm_native) اگر نصب باشد، وگرنه numpy. "numpy" یا "native" برای اجبار.
+    GPM_NATIVE=0 بک‌اند بومی را خاموش می‌کند (مثلاً برای مقایسه)."""
+    import os
+    use_native = backend == "native" or (backend is None and os.getenv("GPM_NATIVE", "1") != "0" and _native() is not None)
+    if use_native:
+        return _simulate_native(G, F, df, a, b, cm, start_equity, risk_cap, kill_equity, cf)
+    return _simulate_numpy(G, F, df, a, b, cm, start_equity, risk_cap, kill_equity, cf)
+
+
+_NATIVE = False
+
+
+def _native():
+    global _NATIVE
+    if _NATIVE is False:
+        try:
+            import gpm_native
+            _NATIVE = gpm_native
+        except ImportError:
+            _NATIVE = None
+    return _NATIVE
+
+
+def _simulate_native(G, F, df, a, b, cm, start_equity, risk_cap, kill_equity, cf):
+    nat = _native()
+    if nat is None:
+        raise ImportError("gpm_native is not installed (see native/README.md)")
+    arr = lambda k: np.ascontiguousarray(df[k].values, dtype=np.float64)
+    mopen = np.ascontiguousarray(df["Market_Open"].values if "Market_Open" in df else np.ones(len(df), bool), dtype=bool)
+    el = np.r_[cm.bar_hours, np.diff(df.index.values).astype("timedelta64[s]").astype(float) / 3600]
+    el = np.ascontiguousarray(np.clip(el, cm.bar_hours, 96))
+    cmt = (float(cm.leverage), float(cm.liq_move), float(cm.fee_rate), float(cm.funding_rate_8h), float(cm.base_spread),
+           float(cm.vol_slippage), float(cm.energy_pct) / 100.0, cm.energy_mode == "notional")
+    cfj = cfa = None
+    if cf is not None:
+        cfj = np.ascontiguousarray(cf[0], dtype=np.float64); cfa = np.ascontiguousarray(cf[1], dtype=np.int64)
+    r = nat.simulate(np.ascontiguousarray(G, dtype=np.float64), np.ascontiguousarray(F, dtype=np.float64),
+                     arr("Open"), arr("High"), arr("Low"), arr("Close"), arr("ATR"), mopen, el, int(a), int(b), cmt,
+                     float(start_equity), None if risk_cap is None else float(risk_cap),
+                     None if kill_equity is None else float(kill_equity), cfj, cfa)
+    eq, trades = r["equity"], r["trades"]
+    return dict(equity=eq, ret=eq / start_equity - 1, liquidated=r["liquidated"], alive=r["alive"], trades=trades,
+                credit=r["credit"], declined=r["declined"], energy=r["energy"], energy_frac=r["energy"] / start_equity,
+                win_rate=np.divide(r["wins"], trades, out=np.zeros(len(G)), where=trades > 0), maxdd=r["maxdd"])
+
+
+def _simulate_numpy(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, risk_cap=None, kill_equity=None, cf=None):
     """risk_cap: حداکثر ضرر تا استاپ به‌صورت سهم از سرمایه (مثلاً ۰٫۰۱). kill_equity: زیر این سطح ژنوم حذف می‌شود."""
     """همه‌ی ژنوم‌ها در پنجره‌ی [a, b) با سرمایه‌ی تازه؛ بدون نگاه به آینده (سیگنال در Close، ورود Open بعدی)."""
     o, h, l, c, atr = (df[k].values for k in ("Open", "High", "Low", "Close", "ATR"))

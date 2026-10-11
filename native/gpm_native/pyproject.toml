@@ -1,0 +1,9 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "gpm_native"
+version = "0.1.0"
+requires-python = ">=3.9"
+description = "Optional native arena hot loop for Gold Phase Monitor (paper only)"

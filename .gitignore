@@ -6,3 +6,6 @@ __pycache__/
 *coinbase_cdp*.json
 *.pem
 .env
+
+native/gpm_native/target/
+dist/
