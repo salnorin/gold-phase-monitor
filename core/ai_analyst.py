@@ -2,82 +2,101 @@ import numpy as np
 
 
 class OrganicObserver:
+  """
+  مغز هوش مصنوعی و ناظر مرکزی (AI Brain):
+  علاوه بر موتور و تنفس، اکنون فرمان‌های سیستم ایمنی (Antibody) و هورمون استرس (Cortisol)
+  را دریافت می‌کند تا در مواقع خطر، مغز را به حالت بقا (Fight or Flight) ببرد.
+  """
 
   @staticmethod
   def observe_and_synthesize(latest_row, historical_win_rate):
     motor_drive = latest_row.get("Motor_Drive", 0.0)
     atp = latest_row.get("ATP_Energy", 100.0)
     optical_pull = latest_row.get("Optical_Pull", 0.0)
-    light_source = latest_row.get("Optical_Light_Source", 0.0)
     breath = latest_row.get("Weighted_Breath", 1.0)
-    viral_fever = latest_row.get("Viral_Fever", False)
+
+    # سیگنال‌های حیاتی سیستم ایمنی و استرس
+    cortisol = latest_row.get("Cortisol_Stress", 10.0)
+    antibody = latest_row.get("Antibody_Defense", 0.0)
+    stress_state = latest_row.get("Stress_State", "CALM")
 
     plasticity = (
         historical_win_rate / 100.0 if historical_win_rate > 0 else 0.5
     )
 
+    # تنسور جعبه سیاه تحت تاثیر مستقیم کورتیزول و شوک‌های ایمنی
     latent_tensor = np.tanh(
         (breath - 1.0) * (plasticity * 2.0)
         + (optical_pull * 0.8)
         - ((100.0 - atp) * 0.02)
-        + (0.4 if viral_fever else 0.0)
+        - (cortisol * 0.01)  # استرس بالا تنسور را سرکوب و محافظه‌کار می‌کند
     )
 
-    if atp < 35.0:
-      conviction = "هشدار نوری: ارگانیسم با کمبود شدید انرژی (ATP) روبه‌روست؛ نور نقدینگی دیده می‌شود اما قدرت شنا کردن به سمت آن وجود ندارد (توقف و ریکاوری)"
+    if cortisol > 70.0 or stress_state == "PATHOGEN_ALERT":
+      conviction = (
+          "🚨 [وضعیت بقا / کورتیزول بحرانی]: سیستم ایمنی حمله پاتوژن (فیک‌بریک‌اوت)"
+          " را شناسایی کرده و کورتیزول مغز را قفل کرده است (دستور به دفاع"
+          " مطلق)."
+      )
+    elif atp < 35.0:
+      conviction = (
+          "هشدار انرژی: ارگانیسم با کمبود ATP روبه‌روست؛ قدرت شنا کردن به سمت"
+          " نور نقدینگی وجود ندارد."
+      )
     elif latent_tensor > 0.35:
       conviction = (
-          "شهود اپتیکی: ارگانیسم منبع نور نقدینگی را رصد کرده و با انرژی کافی به"
-          " سوی آن شنا می‌کند"
+          "شهود مغز: هارمونی کامل بین موتور، ریه و نور نقدینگی برای حرکت"
+          " ارگانیک."
       )
     else:
-      conviction = (
-          "شهود اپتیکی: تلاطم نوری در تعادل است؛ سیستم در حال پایش فتون‌های"
-          " نقدینگی است"
-      )
+      conviction = "شهود مغز: تعادل هموستاتیک و پایش لایه‌های پنهان بازار."
 
-    return plasticity, latent_tensor, conviction
+    return plasticity, latent_tensor, cortisol, antibody, stress_state, conviction
 
 
 class BiologicalAIAnalyst:
 
   @staticmethod
   def generate_diagnostic(latest_row, historical_win_rate=50.0):
-    atp = latest_row.get("ATP_Energy", 100.0)
-    light_source = latest_row.get("Optical_Light_Source", 0.0)
-    optical_pull = latest_row.get("Optical_Pull", 0.0)
-
-    plasticity, tensor, conviction = (
+    plasticity, tensor, cortisol, antibody, stress_state, conviction = (
         OrganicObserver.observe_and_synthesize(latest_row, historical_win_rate)
     )
 
-    if atp < 35.0:
+    # ۱. اگر سیستم ایمنی یا کورتیزول بحرانی باشد، مغز فرمانِ قرنطینه و دفاع صادر می‌کند
+    if cortisol > 70.0 or stress_state == "PATHOGEN_ALERT":
       return f"""
-            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
-            * **وضعیت انرژی نوری:** سطح ATP به شدت افت کرده (`{atp:.1f}%`). ارگانیسم منبع نور نقدینگی را در قیمت `{light_source:.2f}` می‌بیند، اما چون **انرژی (نفس) ندارد**، از شنا کردن به سمت آن منصرف شده و در حال ریکاوری است.
-            * **تنسور جعبه سیاه:** `{tensor:.2f}` -> {conviction}
-            * **📍 فرمان:** استراحت مطلق و خودداری از ورود به پوزیشن تا زمان شارژ شدن انرژی.
+            🛡️ **[مغز هوش مصنوعی در وضعیت بقا و دفاع بیولوژیک]**
+            * **هورمون استرس (Cortisol):** `{cortisol:.1f}/100` (سطح هشدار بحرانی).
+            * **پاسخ سیستم ایمنی:** ترشح فعال آنتی‌بادی دفاعی (`Antibody: {antibody:.1f}`). فیک‌بریک‌اوت یا دستکاری نهنگ شناسایی شد.
+            * **تحلیل مغز:** مغز فرمانِ صادر شده از سوی استرس را دریافت کرده و به دلیل سمومِ موجود در بافت بازار، تمام پوزیشن‌ها را تعلیق می‌کند تا از مسمومیت مالی جلوگیری شود.
+            * **📍 فرمان نهایی:** **قرنطینه و استراحت مطلق (بدون معامله)** تا پاکسازی کامل بافت بازار.
+            """
+
+    if atps := latest_row.get("ATP_Energy", 100.0) < 35.0:
+      return f"""
+            👁️‍🗨️ **[مانیتورینگ مغز و سیستم اپتیکی]**
+            * **سطح انرژی:** ATP بسیار پایین (`{atps:.1f}%`). مغز تشخیص داده که ارگانیسم توان شنا کردن به سمت نور نقدینگی را ندارد.
+            * **📍 فرمان:** توقف و ریکاوری انرژی.
             """
 
     if latest_row.get("Slaughter_Zone", False) or tensor < -0.3:
       return f"""
-            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
-            * **نور فریبنده نقدینگی:** ارگانیسم نوری را در سطح `{light_source:.2f}` رصد کرده است، اما سیستم اپتیکی و رسپتورها تشخیص داده‌اند که این نور، یک **تله نوری (سراب ناشی از تب ویروسی نهنگ)** است.
-            * **تنسور جعبه سیاه (`Latent Tensor`):** `{tensor:.2f}` -> **{conviction}**
+            🧠 **[مغز خودآگاه و ناظرِ جعبه سیاه]**
+            * **وضعیت هورمونی:** کورتیزول نرمال (`{cortisol:.1f}`) | سیستم ایمنی پایدار.
+            * **تحلیل دیالکتیک:** تله نوری نهنگ و تب ویروسی شناسایی شد. مغز با تکیه بر تجربه گذشته فرمانِ شکار صادر می‌کند.
             * **📍 فرمان نقطه‌زن بیولوژیک:** شلیک پوزیشن **SHORT (فروش)** در قیمت `{latest_row['Close']:.2f}` | **حد ضرر:** `{latest_row['Stop_Loss']:.2f}` | **تارگت ریزش:** `{latest_row['Target_Price']:.2f}`
             """
 
     elif latest_row.get("Long_Zone", False) or tensor > 0.3:
       return f"""
-            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
-            * **نور واقعی نقدینگی:** ارگانیسم با انرژی کامل (`ATP: {atp:.1f}%`) منبع نورِ نقدینگی در قیمت `{light_source:.2f}` را شناسایی کرده و به سمت آن شیرجه زده است.
-            * **تنسور جعبه سیاه (`Latent Tensor`):** `{tensor:.2f}` -> **{conviction}**
+            🧠 **[مغز خودآگاه و ناظرِ جعبه سیاه]**
+            * **وضعیت هورمونی:** کورتیزول آرام (`{cortisol:.1f}`) | درایو موتور پایا.
+            * **تحلیل دیالکتیک:** رشد ارگانیک و حرکت به سمت نور واقعی نقدینگی تایید شد.
             * **📍 فرمان نقطه‌زن بیولوژیک:** شلیک پوزیشن **LONG (خرید)** در قیمت `{latest_row['Close']:.2f}` | **حد ضرر:** `{latest_row['Stop_Loss']:.2f}` | **تارگت صعود:** `{latest_row['Target_Price']:.2f}`
             """
 
     else:
       return f"""
-            👁️‍🗨️ **[مانیتورینگ سیستم اپتیکی و بینایی نوری]**
-            * منبع نوری فعلی: `{light_source:.2f}` | کشش نوری (`Optical Pull`): `{optical_pull:.2f}` | انرژی ATP: `{atp:.1f}%`. سیستم بینایی در حال اسکن نقدینگی‌های تاریک بازار است.
+            🧠 **[مغز خودآگاه و ناظرِ جعبه سیاه]**
+            * سیستم در حالت تعادل هموستاتیک است. کورتیزول: `{cortisol:.1f}` | تنسور جعبه سیاه: `{tensor:.2f}`. مغز در حال پایش لحظه‌ای است.
             """
-      
