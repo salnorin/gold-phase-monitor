@@ -1,3 +1,4 @@
+import json
 # app.py — داشبورد موجود زنده (فقط شبیه‌سازی کاغذی؛ هیچ سفارش واقعی)
 from datetime import timedelta
 import time
@@ -516,7 +517,10 @@ def dashboard():
         st.markdown(f"**{T('explain')}**")
         st.markdown(explain)
 
-    t1, t2, t3, t6, t4, t5 = st.tabs([T("tab_signals"), T("tab_trades"), T("tab_learning"), T("tab_ledger"), T("tab_memory"), T("tab_crypto")])
+    t1, t2, t3, t6, t4, t5, t7 = st.tabs([T("tab_signals"), T("tab_trades"), T("tab_learning"), T("tab_ledger"), T("tab_memory"),
+                                          T("tab_crypto"), T("tab_colony")])
+    with t7:
+        colony_tab(); credit_footer()
     with t5:
         crypto_tab(); credit_footer()
     with t1:
@@ -593,6 +597,26 @@ def dashboard():
             st.download_button(T("dl_ledger"), led.to_csv(index=False).encode("utf-8"), "decision_ledger.csv", "text/csv")
             st.caption(T("regret", v=extra["gate_regret"]))
         credit_footer()
+
+
+def colony_tab():
+    """Memory monitor of the local organism colony (reads the supervisor's status file; paper only)."""
+    from core.colony import COLONY_DIR
+    st.subheader(T("colony_h"))
+    st.caption(T("colony_note"))
+    p = COLONY_DIR / "colony_status.json"
+    if not p.exists():
+        st.info(T("colony_empty")); return
+    d = json.loads(p.read_text())
+    inst = pd.DataFrame(d.get("instances", []))
+    a, b, c = st.columns(3)
+    a.metric(T("colony_n"), f"{d.get('n', 0)} / {d.get('cap', 21)}")
+    b.metric(T("colony_rss"), f"{d.get('total_rss_mb', 0):,.0f} MB")
+    c.metric(T("colony_leaks"), int(inst["leak"].sum()) if "leak" in inst else 0)
+    if not inst.empty:
+        cols = [k for k in ("id", "pid", "alive", "cycle", "mean_ret", "trades", "rss_mb", "peak_mb", "trend_mb_min", "leak") if k in inst]
+        st.dataframe(inst[cols], width="stretch")
+    st.write([e["e"] for e in d.get("events", [])[-15:]])
 
 
 live_panel()
