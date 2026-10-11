@@ -1,30 +1,40 @@
 import numpy as np
 import pandas as pd
 
-
 class MetabolicMotorSystem:
-  """موتور حرکتی و مدیریت انرژی ATP و درایو حرکتی ارگانیسم"""
+    def __init__(self):
+        self.base_atp = 100.0
 
-  @staticmethod
-  def compute_motor_drive(df):
-    closes = df["Close"].values
-    n = len(df)
-    atp_arr = np.zeros(n)
-    drive_arr = np.zeros(n)
+    def calculate_motor_drive(self, df: pd.DataFrame) -> pd.DataFrame:
+        n = len(df)
+        atp = np.full(n, self.base_atp, dtype=float)
+        motor_drive = np.zeros(n)
 
-    curr_atp = 100.0
+        closes = df["Close"].values
+        highs = df["High"].values
+        lows = df["Low"].values
+        volumes = df["Volume"].values
 
-    for i in range(1, n):
-      price_diff = closes[i] - closes[i - 1]
-      volatility = abs(price_diff) / closes[i - 1]
+        vol_ma = pd.Series(volumes).rolling(20, min_periods=1).mean().values
+        returns = pd.Series(closes).pct_change().fillna(0).values
 
-      # مصرف انرژی بر اساس نوسان بازار
-      curr_atp = max(10.0, curr_atp - (volatility * 500) + 2.0)
+        current_atp = self.base_atp
 
-      atp_arr[i] = curr_atp
-      drive_arr[i] = np.tanh(price_diff * 100) * (curr_atp / 100.0)
+        for i in range(1, n):
+            volatility = (highs[i] - lows[i]) / (closes[i] + 1e-9)
+            volume_factor = volumes[i] / (vol_ma[i] + 1e-9)
 
-    df["ATP_Energy"] = atp_arr
-    df["Motor_Drive"] = drive_arr
-    return df
-    
+            energy_cost = (volatility * 70) + (min(volume_factor, 5) * 2.5)
+            current_atp = max(8.0, current_atp - energy_cost)
+
+            if volatility < 0.0028 and volume_factor < 1.3:
+                current_atp = min(100.0, current_atp + 3.8)
+
+            atp[i] = current_atp
+            momentum = returns[i] * 80
+            motor_drive[i] = np.tanh(momentum) * (current_atp / 100.0)
+
+        df = df.copy()
+        df["ATP_Energy"] = atp
+        df["Motor_Drive"] = motor_drive
+        return df
