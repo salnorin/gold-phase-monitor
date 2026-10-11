@@ -101,9 +101,13 @@ class RespirationEngine:
             0,
         )
 
-        df = df.bfill()
+        # Fill NaNs safely (compatible with all recent pandas versions)
+        try:
+            df = df.bfill().ffill()
+        except Exception:
+            df = df.fillna(method="bfill").fillna(method="ffill")
         df = df.fillna(0)
-        df.dropna(subset=["Close"], inplace=True)
+        df = df.dropna(subset=["Close"])
         return df
 
     def fetch_and_process(
@@ -116,4 +120,3 @@ class RespirationEngine:
         if df is None:
             return None
         return self.process_respiration(df)
-        
