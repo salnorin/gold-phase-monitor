@@ -4,7 +4,9 @@ import pytest
 
 from core import defi as D
 from core import whales as W
-from core.crypto import CRYPTO_SIM, crypto_features, run_crypto_arena
+from core.crypto import crypto_features, crypto_sim, run_crypto_arena
+from core.fx import FxQuote, paper_capital
+CAP = paper_capital(FxQuote(1.25, pd.Timestamp('2026-10-10', tz='UTC'), 'mock'))
 from tests.conftest import make_ohlcv
 
 
@@ -67,11 +69,11 @@ def test_arkham_adapter_with_key(monkeypatch):
 
 def test_crypto_arena_rules():
     f = crypto_features(make_ohlcv(900, 3).tz_convert("UTC"), "BTC-USD", D.defi_signals(daily(80)))
-    res, _ = run_crypto_arena(f, pop=200, generations=2, tiers=(20.0,))
+    res, _ = run_crypto_arena(f, pop=200, generations=2, tiers=(20.0,), cap=CAP)
     assert set(res) == {20.0}
     from core import arena as A
     from core.paper import CostModel
     df, F = A.feature_matrix(f)
     r = A.simulate_population(A.random_genomes(300, np.random.default_rng(0)), F, df, 50, len(df),
-                              CostModel(leverage=20), **CRYPTO_SIM)
-    assert (r["equity"][r["alive"]] > 7.0).all()
+                              CostModel(leverage=20), **crypto_sim(CAP))
+    assert (r["equity"][r["alive"]] > 472.64).all()

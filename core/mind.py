@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from core.brain import Brain, Trade
-from core.config import OrganismConfig
+from core.config import MAX_RISK_PER_TRADE, OrganismConfig
 from core.paper import CostModel, open_position, step_position
 from core.market_hours import is_market_open, market_status
 
@@ -25,12 +25,12 @@ class MindConfig:
     organism: OrganismConfig = field(default_factory=lambda: OrganismConfig(
         min_score=0.35, min_confidence=0.2, target_atr_mult=3.0, stop_atr_mult=1.5,
         max_hold_bars=48, require_respiration=False))
-    start_equity: float = 10_000.0
+    start_equity: float = 10_000.0    # برای اجرا با سرمایه‌ی کاربر از capital_mind_config() استفاده کنید
     leverage: float = 20.0
     bar_hours: float = 1.0
-    base_risk: float = 0.01
+    base_risk: float = 0.0075         # پایه؛ با موفقیت پیوسته آهسته تا سقف ۱٪ رشد می‌کند
     min_risk: float = 0.0025
-    max_risk: float = 0.015
+    max_risk: float = MAX_RISK_PER_TRADE
     win_streak_step: float = 0.05
     max_consec_losses: int = 4
     loss_rest_bars: int = 24
@@ -53,9 +53,18 @@ class MindConfig:
     demote_bars: int = 300
     min_trades_promote: int = 3
     purpose_max_effect: float = 0.05
-    capital_cap: float = 0.0          # سقف سرمایه‌ی قابل استفاده (۰ = بدون سقف)، مثلاً ۱۰ دلار
-    kill_equity: float = 0.0          # توقف کامل وقتی آب‌میوه به این سطح برسد (مثلاً ۷ دلار)
+    capital_cap: float = 0.0          # سقف سرمایه‌ی قابل استفاده (۰ = بدون سقف)
+    kill_equity: float = 0.0          # توقف کامل در این سطح (capital_mind_config: ۷۰٪ سقف)
     market: str = "cme"               # "24/7" برای کریپتو
+
+
+def capital_mind_config(cap=None, **overrides) -> MindConfig:
+    """MindConfig با سرمایه‌ی مجازی کاربر (یورو → دلار با نرخ زنده)."""
+    from core.fx import paper_capital
+    cap = cap or paper_capital()
+    kw = dict(start_equity=cap.usd, capital_cap=cap.usd, kill_equity=cap.stop_usd, max_risk=MAX_RISK_PER_TRADE)
+    kw.update(overrides)
+    return MindConfig(**kw)
 
 
 def mind_features(feat: pd.DataFrame, cfg: MindConfig) -> pd.DataFrame:
@@ -202,6 +211,8 @@ class Mind:
                                               atr[i - 1] * oc.stop_atr_mult, atr[i - 1] * oc.target_atr_mult,
                                               risk_frac=c.base_risk, index=i, time=t)
                 shadow_pending[s] = None
+            if pending is not None and pos is None and not row.get("Market_Open", True):
+                pending = None                      # ورود روی کندل بسته/اولین کندل پس از بازگشایی ممنوع
             if pending is not None and pos is None:
                 d, strat, pctx, risk = pending
                 usable = min(self.equity, c.capital_cap) if c.capital_cap > 0 else self.equity

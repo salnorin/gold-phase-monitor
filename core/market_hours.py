@@ -83,3 +83,22 @@ def market_status(last_bar_time, now, interval_hours):
     if is_stale(last_bar_time, now, interval_hours):
         return False, "داده‌ی کهنه (کندل تازه‌ای نیامده) → ارگانیسم خواب است"
     return True, "بازار باز است"
+
+
+FEED_DELAY_MIN = 15   # داده‌ی آتی CME در Yahoo حدود ۱۰ دقیقه تأخیر دارد
+
+
+def status_detail(last_bar_time, now, interval_hours, feed_delay_min: float = 0.0):
+    """('open'|'closed'|'awaiting'|'stale', دلیل فارسی). awaiting = بازار باز شده ولی هنوز اولین کندل بسته‌شده نرسیده.
+    feed_delay_min: تأخیر شناخته‌شده‌ی منبع داده که به آستانه‌ی کهنگی اضافه می‌شود."""
+    now = pd.Timestamp(now).tz_convert("UTC")
+    last_bar_time = pd.Timestamp(last_bar_time).tz_convert("UTC")
+    if not is_market_open(now):
+        return "closed", "بازار بسته است (تعطیلی آخر هفته، وقفه‌ی روزانه‌ی CME یا تعطیل رسمی)"
+    if is_stale(last_bar_time, now - pd.Timedelta(minutes=feed_delay_min), interval_hours):
+        bar_end = last_bar_time + pd.Timedelta(hours=interval_hours)
+        probe = pd.date_range(bar_end, now, freq="15min")
+        if any(not is_market_open(t) for t in probe):
+            return "awaiting", "بازار باز شده؛ منتظر اولین کندل بسته‌شده پس از بازگشایی"
+        return "stale", "داده‌ی کهنه: کندل تازه‌ای از منبع نرسیده"
+    return "open", "بازار باز است و داده تازه است"
