@@ -85,3 +85,27 @@ def test_mind_trades_synthetic():
     m = Mind(MindConfig(whale_volume=99, whale_range_atr=99, low_oxygen=0.0))
     m.run(feats(2000, 7))
     assert all(p.margin <= p.notional / 20 + 1e-6 for p in m.trades)
+
+
+def test_market_hours_and_stale():
+    from core.market_hours import is_market_open, is_stale, market_status
+    B = "Europe/Berlin"
+    ts = lambda s: pd.Timestamp(s, tz=B)
+    assert is_market_open(ts("2026-10-07 15:00"))          # چهارشنبه
+    assert not is_market_open(ts("2026-10-07 23:30"))      # وقفه‌ی روزانه
+    assert not is_market_open(ts("2026-10-09 23:30"))      # جمعه شب
+    assert not is_market_open(ts("2026-10-10 12:00"))      # شنبه
+    assert not is_market_open(ts("2026-10-11 22:00"))      # یکشنبه قبل از باز شدن
+    assert is_market_open(ts("2026-10-12 00:30"))          # دوشنبه 00:30 برلین = یکشنبه 17:30 CT
+    assert is_stale(ts("2026-10-07 10:00"), ts("2026-10-07 14:00"), 1.0)
+    assert not is_stale(ts("2026-10-07 12:00"), ts("2026-10-07 13:30"), 1.0)
+    assert market_status(ts("2026-10-07 12:00"), ts("2026-10-07 13:30"), 1.0)[0]
+
+
+def test_no_signal_when_closed_or_stale():
+    f = feats(800, 7)
+    j = Mind(MindConfig(whale_volume=99, whale_range_atr=99, low_oxygen=0.0)).run(f, now=f.index[-1] + pd.Timedelta(days=3))
+    assert j["action"].iloc[-1] == "WAIT" and "خواب" in j["reason"].iloc[-1] and not j["market_open"].iloc[-1]
+    from core.market_hours import is_market_open
+    closed = [not is_market_open(t) for t in j.index]
+    assert (j.loc[closed, "action"] == "WAIT").all()

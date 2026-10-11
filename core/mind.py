@@ -13,6 +13,7 @@ import pandas as pd
 from core.brain import Brain, Trade
 from core.config import OrganismConfig
 from core.paper import CostModel, open_position, step_position
+from core.market_hours import is_market_open, market_status
 
 STATES = ("bull", "bear", "range")
 STRATEGIES = ("organism", "trend", "reversion")
@@ -166,7 +167,8 @@ class Mind:
         self.trust[regime] = float(np.clip(self.trust[regime] + step, 0.1, 0.9))
         return right
 
-    def run(self, feat: pd.DataFrame):
+    def run(self, feat: pd.DataFrame, now=None):
+        """now: زمان فعلی (برای حالت زنده)؛ اگر بازار بسته یا داده کهنه باشد، کندل آخر «خواب» است."""
         c, oc = self.cfg, self.cfg.organism
         f = mind_features(feat, c)
         rows = f.to_dict("records")
@@ -253,7 +255,13 @@ class Mind:
             d = dirs[self.active]
             dom_thr, doubt_thr = c.dominance, c.max_doubt
             hard = None
-            if self.equity <= 0: hard = "آب‌میوه تمام شد"
+            live_closed = None
+            if now is not None and i == n - 1:
+                ok, msg = market_status(t, now, c.bar_hours)
+                live_closed = None if ok else msg
+            if live_closed: hard = live_closed
+            elif not is_market_open(t): hard = "بازار بسته است → خواب"
+            elif self.equity <= 0: hard = "آب‌میوه تمام شد"
             elif i < rest_until: hard = "استراحت اجباری (حد ضرر/افت سرمایه)"
             elif row["Vol_Ratio"] > c.vol_rest_ratio: hard = "نوسان بیش از ۲ برابر عادی → استراحت"
             elif i < caution_until: hard = "احتیاط: ردپای نهنگ"
@@ -289,7 +297,8 @@ class Mind:
                             regime=regime, oxygen=float(row["Oxygen"]), vol_ratio=float(row["Vol_Ratio"]),
                             whale=bool(row["Whale"]), intuition=intuition, evidence=evidence, doubt=doubt, trust=w,
                             purpose=purpose, strategy=self.active, action=action, reason=reason, juice=self.equity,
-                            drawdown=1 - self.equity / self.peak, in_position=pos is not None, intuition_right=None))
+                            drawdown=1 - self.equity / self.peak, in_position=pos is not None, intuition_right=None,
+                            market_open=not bool(hard and "خواب" in hard)))
         self.journal = out
         return pd.DataFrame(out).set_index("time")
 
