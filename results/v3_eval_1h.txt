@@ -1,0 +1,35 @@
+bars=13463 IS 2024-06-04 14:00:00-04:00 → 2026-01-27 20:00:00-05:00 | embargo → OOS 2026-02-04 02:00:00-05:00 → 2026-10-09 16:00:00-04:00
+
+== A) Mind ablations ==
+                      variant set  trades  win_rate  avg_R  profit_factor  ret_pct  max_dd_pct  liquidations  max_dd_R  total_R
+                    mind full  IS      71      26.8 -0.469           0.42    -17.0        17.3           0.0       NaN      NaN
+                    mind full OOS      70      22.9 -0.511           0.39    -15.7        15.9           0.0       NaN      NaN
+            mind no black box  IS      86      26.7 -0.471           0.42    -19.0        20.5           0.0       NaN      NaN
+            mind no black box OOS      92      29.3 -0.344           0.55    -13.8        14.2           0.0       NaN      NaN
+        mind frozen intuition  IS      71      26.8 -0.469           0.42    -17.0        17.3           0.0       NaN      NaN
+        mind frozen intuition OOS      70      22.9 -0.511           0.39    -15.7        15.9           0.0       NaN      NaN
+    mind no blackbox + frozen  IS      86      26.7 -0.471           0.42    -19.0        20.5           0.0       NaN      NaN
+    mind no blackbox + frozen OOS      92      29.3 -0.344           0.55    -13.8        14.2           0.0       NaN      NaN
+v2 brain (R only, 0.01% cost)  IS     176      32.4 -0.067           0.90      NaN         NaN           NaN     15.86   -11.79
+v2 brain (R only, 0.01% cost) OOS     145      38.6  0.110           1.17      NaN         NaN           NaN     16.28    15.91
+
+== B) Arena ranking modes (OOS at 20x) ==
+20x-survivor replication {'champions': 50, 'champ_oos_survival': 0.98, 'champ_oos_liquidated': 0.02, 'champ_oos_median_ret': -0.123, 'champ_oos_profitable': 0.22, 'champ_oos_median_trades': 9.5, 'random_oos_survival': 0.728, 'random_oos_liquidated': 0.015, 'random_oos_median_ret': -0.347, 'random_oos_profitable': 0.054, 'champ_pctile_vs_random': 97.95}
+spot risk-adj + 1/4 Kelly @20x {'champions': 50, 'champ_oos_survival': 0.98, 'champ_oos_liquidated': 0.02, 'champ_oos_median_ret': -0.113, 'champ_oos_profitable': 0.26, 'champ_oos_median_trades': 11.0, 'random_oos_survival': 0.728, 'random_oos_liquidated': 0.015, 'random_oos_median_ret': -0.347, 'random_oos_profitable': 0.054, 'champ_pctile_vs_random': 98.25, 'kelly_median_risk': 0.02}
+
+== Tier survival (user mode) ==
+20x IS survival per gen: [0.67, 0.8, 0.82, 0.71, 0.87, 0.81, 0.64, 0.79] | liquidated: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+   OOS: {'champions': 50, 'champ_oos_survival': 0.98, 'champ_oos_liquidated': 0.02, 'champ_oos_median_ret': -0.123, 'champ_oos_profitable': 0.22, 'champ_oos_median_trades': 9.5, 'random_oos_survival': 0.728, 'random_oos_liquidated': 0.015, 'random_oos_median_ret': -0.347, 'random_oos_profitable': 0.054, 'champ_pctile_vs_random': 97.95}
+10x IS survival per gen: [0.72, 0.8, 0.83, 0.72, 0.88, 0.83, 0.65, 0.79] | liquidated: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+   OOS: {'champions': 50, 'champ_oos_survival': 1.0, 'champ_oos_liquidated': 0.0, 'champ_oos_median_ret': -0.074, 'champ_oos_profitable': 0.24, 'champ_oos_median_trades': 10.0, 'random_oos_survival': 0.829, 'random_oos_liquidated': 0.0, 'random_oos_median_ret': -0.191, 'random_oos_profitable': 0.056, 'champ_pctile_vs_random': 97.1}
+1x IS survival per gen: [0.74, 0.8, 0.83, 0.73, 0.87, 0.82, 0.66, 0.78] | liquidated: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+   OOS: {'champions': 50, 'champ_oos_survival': 1.0, 'champ_oos_liquidated': 0.0, 'champ_oos_median_ret': -0.007, 'champ_oos_profitable': 0.28, 'champ_oos_median_trades': 9.0, 'random_oos_survival': 0.998, 'random_oos_liquidated': 0.0, 'random_oos_median_ret': -0.02, 'random_oos_profitable': 0.059, 'champ_pctile_vs_random': 97.05}
+
+== C) Monte Carlo block bootstrap (liquidation probability) ==
+20x {'champ_liq_prob': 0.0, 'random_liq_prob': 0.023, 'champ_median_ret': -0.017}
+10x {'champ_liq_prob': 0.0, 'random_liq_prob': 0.0, 'champ_median_ret': -0.004}
+1x {'champ_liq_prob': 0.0, 'random_liq_prob': 0.0, 'champ_median_ret': 0.0}
+
+real	2m0.225s
+user	2m0.762s
+sys	0m0.217s

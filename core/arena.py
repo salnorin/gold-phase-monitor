@@ -133,7 +133,17 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
                 trades=trades, win_rate=np.divide(wins, trades, out=np.zeros(N), where=trades > 0), maxdd=maxdd)
 
 
-def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0, warmup=250):
+def fitness(r, rank="return"):
+    """return: بازده خام بازماندگان ۲۰x (حالت کاربر). risk_adj: امید ریاضی تعدیل‌شده با افت (برای اسپات)."""
+    surv = r["alive"] & (r["trades"] > 0)
+    if rank == "risk_adj":
+        score = r["ret"] / (r["maxdd"] + 0.02) * np.sqrt(np.minimum(r["trades"], 50) / 50)
+    else:
+        score = r["ret"]
+    return np.where(surv, score, -np.inf), surv
+
+
+def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0, warmup=250, rank="return"):
     """تکامل walk-forward روی [warmup, is_end): هر نسل روی پنجره‌ی زمانی بعدی."""
     rng = np.random.default_rng(seed)
     G = random_genomes(pop, rng)
@@ -151,7 +161,7 @@ def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0,
             G = random_genomes(pop, rng); continue
         if g == generations - 1:
             break
-        order = np.argsort(-np.where(surv, r["ret"], -np.inf))
+        order = np.argsort(-fitness(r, rank)[0])
         n_elite = max(1, min(int(pop * elite_frac), int(surv.sum())))
         elite = G[order[:n_elite]]
         G = np.vstack([elite, mutate(elite, pop - n_elite, rng)])
@@ -160,12 +170,12 @@ def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0,
     return G, final, pd.DataFrame(history)
 
 
-def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1):
+def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1, rank="return", champs=None):
     """قهرمانان (k بهترین بازمانده‌ی IS) در برابر k ژنوم تصادفی؛ آزمون مجدد روی OOS."""
     rng = np.random.default_rng(seed)
-    surv = final["alive"] & (final["trades"] > 0)
-    order = np.argsort(-np.where(surv, final["ret"], -np.inf))
-    champs = G[order[:min(k, int(surv.sum()))]]
+    if champs is None:
+        score, surv = fitness(final, rank)
+        champs = G[np.argsort(-score)[:min(k, int(surv.sum()))]]
     rc = simulate_population(champs, F, df, a, b, cm)
     R = random_genomes(n_random, rng)
     rr = simulate_population(R, F, df, a, b, cm)
