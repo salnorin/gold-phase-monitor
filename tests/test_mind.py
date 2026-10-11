@@ -169,3 +169,9 @@ def test_awake_with_fresh_minute_bar_and_feed_delay():
     assert status_detail(now - pd.Timedelta(minutes=11), now, 1 / 60, feed_delay_min=15)[0] == "open"
     assert status_detail(now - pd.Timedelta(minutes=11), now, 1 / 60)[0] != "open"
     assert status_detail(pd.Timestamp("2026-10-11 22:15", tz="UTC"), pd.Timestamp("2026-10-11 22:25", tz="UTC"), 1 / 60, 15)[0] == "open"
+
+
+def test_paxg_does_not_open_gold_market():
+    from core.market_hours import status_detail
+    sat = pd.Timestamp("2026-10-10 12:00", tz="Europe/Berlin")   # PAXG معامله می‌شود، ولی بازار طلا بسته است
+    assert status_detail(sat - pd.Timedelta(minutes=1), sat, 1 / 60)[0] == "closed"
