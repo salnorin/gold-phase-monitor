@@ -20,8 +20,8 @@ def test_mind_no_lookahead():
     a = Mind().run(BiologicalOrganism().build_features(raw.iloc[:k]))
     b = Mind().run(BiologicalOrganism().build_features(raw))
     # کندل آخر پیشوند: سیگنال ممکن است «در کندل آخر» باشد ولی اقدام یکسان است؛ ستون‌ها تا k-1 کاملاً برابرند
-    pd.testing.assert_frame_equal(a[DECISION_COLS].iloc[:k - 1], b[DECISION_COLS].iloc[:k - 1])
-    assert (a["action"].iloc[-1] == b["action"].iloc[k - 1])
+    pd.testing.assert_frame_equal(a[DECISION_COLS].iloc[:-1], b.loc[a.index[:-1], DECISION_COLS])
+    assert a["action"].iloc[-1] == b.loc[a.index[-1], "action"]
 
 
 def test_state_probabilities_sum_to_one():
@@ -78,7 +78,7 @@ def test_hard_limits_and_journal(tmp_path):
     p = m.save_journal(str(tmp_path / "j.sqlite"))
     import sqlite3
     with sqlite3.connect(p) as con:
-        assert con.execute("select count(*) from decisions").fetchone()[0] == 600
+        assert con.execute("select count(*) from decisions").fetchone()[0] == len(j)
 
 
 def test_mind_trades_synthetic():
@@ -109,3 +109,17 @@ def test_no_signal_when_closed_or_stale():
     from core.market_hours import is_market_open
     closed = [not is_market_open(t) for t in j.index]
     assert (j.loc[closed, "action"] == "WAIT").all()
+
+
+def test_forming_candle_holiday_and_reopen():
+    from core.market_hours import drop_forming_candle, is_market_open, open_mask
+    idx = pd.date_range("2026-10-07 10:00", periods=3, freq="h", tz="UTC")
+    df = pd.DataFrame({"Close": [1, 2, 3]}, index=idx)
+    assert len(drop_forming_candle(df, 1.0, now=pd.Timestamp("2026-10-07 12:30", tz="UTC"))) == 2
+    assert len(drop_forming_candle(df, 1.0, now=pd.Timestamp("2026-10-07 13:00", tz="UTC"))) == 3
+    assert not is_market_open(pd.Timestamp("2026-12-25 15:00", tz="Europe/Berlin"))   # کریسمس
+    # یکشنبه 17:00 CT بازگشایی → اولین کندل مسدود، دومی آزاد
+    reopen = pd.date_range("2026-10-11 17:00", periods=3, freq="h", tz="America/Chicago")
+    fri = pd.DatetimeIndex([pd.Timestamp("2026-10-09 14:00", tz="America/Chicago")])
+    m = open_mask(fri.append(reopen), 1.0)
+    assert list(m) == [True, False, True, True]

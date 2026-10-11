@@ -23,7 +23,7 @@ class ImmuneAndStressSystem:
 
     closes = df["Close"].values
     volumes = df["Volume"].values
-    vol_ma = df["Volume"].rolling(20).mean().fillna(1).values
+    vol_ma = df["Volume"].rolling(20).mean().replace(0, np.nan).fillna(np.inf).values
 
     curr_cortisol = 10.0
 

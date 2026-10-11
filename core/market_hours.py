@@ -10,6 +10,29 @@ import pandas as pd
 
 CT = "America/Chicago"
 
+try:   # تعطیلات رسمی CME (اختیاری)
+    import exchange_calendars as _xc
+    _CAL = _xc.get_calendar("CMES")
+except Exception:  # pragma: no cover
+    _CAL = None
+
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=20000)
+def _holiday_date(d) -> bool:
+    if _CAL is None or d.weekday() >= 5:
+        return False
+    try:
+        return not _CAL.is_session(pd.Timestamp(d))
+    except Exception:
+        return False
+
+
+def _holiday(t_ct) -> bool:
+    return _holiday_date((t_ct + pd.Timedelta(hours=7)).date())   # جلسه از 17:00 روز قبل
+
 
 def is_market_open(ts) -> bool:
     t = pd.Timestamp(ts)
@@ -23,7 +46,29 @@ def is_market_open(ts) -> bool:
         return False
     if wd in (0, 1, 2, 3) and 16 <= hm < 17:   # وقفه‌ی روزانه
         return False
-    return True
+    return not _holiday(t)
+
+
+is_open = is_market_open
+
+
+def open_mask(index, bar_hours: float):
+    """True فقط برای کندل‌هایی که بازار باز است و «اولین کندل پس از بازگشایی» نیستند."""
+    idx = pd.DatetimeIndex(index)
+    is_o = pd.Series([is_market_open(t) for t in idx], index=idx)
+    gap = pd.Series(idx, index=idx).diff() > pd.Timedelta(hours=bar_hours * 2.5)
+    first_after_reopen = gap | ~is_o.shift(1, fill_value=True)
+    return (is_o & ~first_after_reopen).values
+
+
+def drop_forming_candle(df, bar_hours: float, now=None):
+    """کندل در حال شکل‌گیری حذف می‌شود: فقط کندل‌هایی که index + طول کندل <= اکنون."""
+    if df is None or df.empty:
+        return df
+    now = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    if df.index[-1] + pd.Timedelta(hours=bar_hours) > now:
+        return df.iloc[:-1]
+    return df
 
 
 def is_stale(last_bar_time, now, interval_hours: float, stale_intervals: float = 2.0) -> bool:

@@ -22,8 +22,8 @@ class DataFeeder:
 
     def _fetch_yfinance(self, symbol: str, interval: str, lookback_days: int) -> Optional[pd.DataFrame]:
         try:
-            end = datetime.now()
-            start = end - timedelta(days=lookback_days)
+            end = datetime.utcnow() + timedelta(days=1)   # end انحصاری است → امروز هم شامل شود
+            start = end - timedelta(days=lookback_days + 1)
 
             df = yf.download(
                 symbol,
@@ -42,6 +42,8 @@ class DataFeeder:
 
             df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
             df.dropna(inplace=True)
+            idx = pd.to_datetime(df.index, utc=True)
+            df.index = idx.tz_convert("America/New_York")      # همیشه یک منطقه‌ی زمانی ثابت
             return df
 
         except Exception as e:

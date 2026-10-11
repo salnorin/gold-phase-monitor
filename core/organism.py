@@ -1,4 +1,5 @@
 # core/organism.py
+import pandas as pd
 from core.brain import Brain
 from core.config import OrganismConfig, DEFAULT_CONFIG
 from core.immune_engine import ImmuneAndStressSystem
@@ -19,13 +20,18 @@ class BiologicalOrganism:
         self.brain = None
         self.trades = []
 
-    def build_features(self, raw):
+    def build_features(self, raw, warmup: int = 250):
+        """ویژگی‌ها + حذف warm-up (حالت‌های بازگشتی از کندل صفر شروع می‌شوند) + ستون Market_Open."""
+        from core.market_hours import open_mask
         df = self.respiration.process_respiration(raw)
         if df is None or df.empty:
             return None
         df = self.motor.calculate_motor_drive(df)
         df = self.optical.calculate_optical_field(df)
-        return self.immune.evaluate_toxicity_and_stress(df)
+        df = self.immune.evaluate_toxicity_and_stress(df)
+        bar_h = pd.Series(df.index).diff().median().total_seconds() / 3600 if len(df) > 1 else 1.0
+        df["Market_Open"] = open_mask(df.index, bar_h)
+        return df.iloc[warmup:] if len(df) > warmup * 2 else df
 
     def live_cycle(self, symbol=None, interval=None, lookback_days=None):
         c = self.cfg

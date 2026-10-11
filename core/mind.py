@@ -125,7 +125,8 @@ class Mind:
         self.trust = {s: 0.5 for s in STATES}
         self.strat = {s: dict(score=0.0, n=0, demoted_until=-1) for s in STRATEGIES}
         self.active = "organism"
-        self.equity = self.peak = self.cfg.start_equity
+        self.equity = self.peak = self.peak_all = self.cfg.start_equity
+        self.open_pos = None
         self.journal, self.trades, self.events, self.trust_history = [], [], [], []
 
     def strategy_dirs(self, row, brain_dir):
@@ -210,6 +211,7 @@ class Mind:
             if pos is not None and step_position(self.cm, pos, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t, el[i]):
                 self.equity = max(0.0, self.equity + pos.pnl)
                 self.peak = max(self.peak, self.equity)
+                self.peak_all = max(self.peak_all, self.equity)
                 self.trades.append(pos)
                 strat = pos.context["strategy"]
                 if strat == "organism" and pos.qty > 0:
@@ -262,7 +264,7 @@ class Mind:
                 ok, msg = market_status(t, now, c.bar_hours)
                 live_closed = None if ok else msg
             if live_closed: hard = live_closed
-            elif not is_market_open(t): hard = "بازار بسته است → خواب"
+            elif not row.get("Market_Open", is_market_open(t)): hard = "بازار بسته / اولین کندل پس از بازگشایی → خواب"
             elif self.equity <= 0: hard = "آب‌میوه تمام شد"
             elif i < rest_until: hard = "استراحت اجباری (حد ضرر/افت سرمایه)"
             elif row["Vol_Ratio"] > c.vol_rest_ratio: hard = "نوسان بیش از ۲ برابر عادی → استراحت"
@@ -299,13 +301,23 @@ class Mind:
                             regime=regime, oxygen=float(row["Oxygen"]), vol_ratio=float(row["Vol_Ratio"]),
                             whale=bool(row["Whale"]), intuition=intuition, evidence=evidence, doubt=doubt, trust=w,
                             purpose=purpose, strategy=self.active, action=action, reason=reason, juice=self.equity,
-                            drawdown=1 - self.equity / self.peak, in_position=pos is not None, intuition_right=None,
+                            drawdown=1 - self.equity / self.peak, drawdown_all=1 - self.equity / self.peak_all, in_position=pos is not None, intuition_right=None,
                             market_open=not bool(hard and "خواب" in hard)))
         self.journal = out
+        self.open_pos = pos
         return pd.DataFrame(out).set_index("time")
 
     def trades_frame(self):
-        return pd.DataFrame([dict(entry_time=p.open_time, exit_time=p.exit_time, direction="LONG" if p.direction > 0 else "SHORT",
+        rows = self._closed_rows()
+        if self.open_pos is not None:
+            p = self.open_pos
+            rows.append(dict(entry_time=p.open_time, exit_time=None, direction="LONG" if p.direction > 0 else "SHORT",
+                             strategy=p.context.get("strategy"), entry=round(p.entry, 2), exit=None,
+                             reason="باز", pnl=None, R=None))
+        return pd.DataFrame(rows)
+
+    def _closed_rows(self):
+        return ([dict(entry_time=p.open_time, exit_time=p.exit_time, direction="LONG" if p.direction > 0 else "SHORT",
                                   strategy=p.context.get("strategy"), entry=round(p.entry, 2), exit=round(p.exit, 2),
                                   reason=p.reason, pnl=round(p.pnl, 2), R=round(p.r_multiple, 2)) for p in self.trades])
 

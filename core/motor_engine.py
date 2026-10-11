@@ -17,7 +17,8 @@ class MetabolicMotorSystem:
         rng = (df["High"] - df["Low"]) / df["Close"]
         normal = rng.shift(1).rolling(100, min_periods=10).median()
         rel_vol = (rng / normal).fillna(1.0).clip(0, 6).values
-        volf = (df["Volume"] / df["Volume"].shift(1).rolling(20, min_periods=1).mean()).fillna(1.0).clip(0, 5).values
+        vm = df["Volume"].shift(1).rolling(20, min_periods=1).mean().replace(0, np.nan)
+        volf = (df["Volume"] / vm).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(0, 5).values
         ret = df["Close"].pct_change().fillna(0)
         ret_sd = ret.shift(1).rolling(50, min_periods=10).std().replace(0, np.nan)
         z = (ret / ret_sd).fillna(0).values

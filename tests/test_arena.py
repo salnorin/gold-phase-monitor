@@ -46,6 +46,6 @@ def test_evolution_uses_only_in_sample():
 def test_deflation_runs():
     df, F = setup(1000)
     cm = CostModel(leverage=10)
-    G, final, _ = A.evolve(F, df, 700, cm, pop=300, generations=2, seed=1, warmup=100)
-    d, champs = A.deflation_test(G, final, F, df, 700, 1000, cm, k=10, n_random=200)
+    G, final, _ = A.evolve(F, df, 500, cm, pop=300, generations=2, seed=1, warmup=50)
+    d, champs = A.deflation_test(G, final, F, df, 550, len(df), cm, k=10, n_random=200)
     assert 0 <= d["champ_pctile_vs_random"] <= 100 and d["champions"] <= 10

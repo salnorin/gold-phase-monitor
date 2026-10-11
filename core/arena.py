@@ -73,6 +73,7 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
     pend = np.zeros(N)
     trades = np.zeros(N); wins = np.zeros(N); peak = eq.copy(); maxdd = np.zeros(N)
     lm = cm.liq_move
+    mopen = df["Market_Open"].values if "Market_Open" in df else np.ones(len(df), bool)
     el = np.r_[cm.bar_hours, np.diff(df.index.values).astype("timedelta64[s]").astype(float) / 3600]
     el = np.clip(el, cm.bar_hours, 96)   # آخر هفته → سواپ بیشتر
     for i in range(a, b):
@@ -119,12 +120,14 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
         # سیگنال
         if i < b - 1:
             s = (W @ F[i]) / wnorm
-            can = alive & ~inpos
+            can = alive & ~inpos & bool(mopen[i])
             pend[can] = np.where(np.abs(s[can]) >= thr[can], np.sign(s[can]), 0)
     # پوزیشن باز در پایان پنجره در Close بسته می‌شود
-    if inpos.any():
-        gross = qty * (c[b - 1] - entry) * d
-        eq[inpos] += (np.maximum(gross, -margin) - cost)[inpos]
+    if inpos.any():   # بستن اجباری در پایان پنجره، با اسلیپیج و کارمزد
+        px = c[b - 1] - d * (c[b - 1] * cm.base_spread + atr[b - 1] * cm.vol_slippage)
+        gross = qty * (px - entry) * d
+        eq[inpos] += (np.maximum(gross, -margin) - cost - qty * np.abs(px) * cm.fee_rate)[inpos]
+        trades[inpos] += 1
     eq = np.maximum(eq, 0)
     return dict(equity=eq, ret=eq / start_equity - 1, liquidated=liquidated, alive=alive & ~liquidated,
                 trades=trades, win_rate=np.divide(wins, trades, out=np.zeros(N), where=trades > 0), maxdd=maxdd)
@@ -152,7 +155,8 @@ def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0,
         n_elite = max(1, min(int(pop * elite_frac), int(surv.sum())))
         elite = G[order[:n_elite]]
         G = np.vstack([elite, mutate(elite, pop - n_elite, rng)])
-    final = r
+    # بازامتیازدهی نهایی روی کل IS (نه فقط آخرین پنجره) برای انتخاب قهرمانان
+    final = simulate_population(G, F, df, edges[0], is_end, cm)
     return G, final, pd.DataFrame(history)
 
 
@@ -184,20 +188,21 @@ def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1):
 
 
 def run_arena(raw, cross_raw=None, interval_hours=1.0, pop=10_000, generations=8, tiers=(20.0, 10.0, 1.0),
-              is_frac=0.7, seed=0):
+              is_frac=0.7, seed=0, embargo=96):
     feat = BiologicalOrganism().build_features(raw)
     if cross_raw is not None:
         from core.research import add_cross
         feat = add_cross(feat, cross_raw)
     df, F = feature_matrix(feat)
     is_end = int(len(df) * is_frac)
+    oos_start = min(len(df) - 2, is_end + embargo)     # embargo بین IS و OOS
     out = {}
     for lev in tiers:
         cm = CostModel(leverage=lev, bar_hours=interval_hours)
         G, final, hist = evolve(F, df, is_end, cm, pop=pop, generations=generations, seed=seed)
-        defl, champs = deflation_test(G, final, F, df, is_end, len(df), cm)
+        defl, champs = deflation_test(G, final, F, df, oos_start, len(df), cm)
         out[lev] = dict(history=hist, deflation=defl, champions=champs)
-    return out, df.index[is_end]
+    return out, df.index[oos_start]
 
 
 if __name__ == "__main__":
