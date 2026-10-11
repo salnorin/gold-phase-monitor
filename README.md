@@ -86,6 +86,23 @@ streamlit run app.py
 Honest result (Oct 2026, GC=F 1h): no edge. With realistic perp-style costs the mind loses ~0.3–0.5 R per trade;
 evolved champions lose less than random genomes OOS (~98th percentile) but still lose money.
 
+## How LONG / SHORT / WAIT are generated
+
+Paper only. No code here places real orders, and Coinbase access is read-only.
+
+1. **Organs vote** on every closed candle (respiration, optical pull, motor drive, immune, cross-asset, market-wide view). Each vote is in [-1, 1]. The brain takes a weighted average (`score`), then applies homeostasis to get a `confidence`: score × energy (ATP) × (1 − stress/cortisol) × (1 − fatigue).
+2. **Brain gate:** a direction exists only if |score| ≥ `min_score` (0.35) and confidence ≥ `min_confidence` (0.20), the market is open, it isn't the first bar after a reopen, and the brain isn't resting.
+3. **Strategy pool:** `organism` (the brain direction), `trend` (dominant state plus motor drive) and `reversion` (range state plus optical pull). Only the currently promoted strategy can act; the others trade in shadow.
+4. **Hard limits → WAIT:** market closed or data stale, auto-stop (equity ≤ 70% of cap), forced rest after 4 consecutive losses or a 10% drawdown, volatility > 2× normal, whale caution (6 bars), low oxygen (< 0.5).
+5. **Mind gates → WAIT:**
+   - The dominant state probability must be ≥ `dominance` (0.55). This threshold is softened by at most 0.05 by purpose and ±0.03 by ledger gate-regret.
+   - Doubt (|intuition − evidence| / 2) must be ≤ `max_doubt` (0.6).
+   - Intuition and evidence, blended by trust, must agree with the direction.
+   - The black box must not match a recent losing context.
+6. If every gate passes, the action is **LONG** or **SHORT**. Entry is at the next bar's open. Stop = 1.5 ATR and target = 3 ATR (the 20x arena uses tighter bounds). Risk is ≤ 1% of cap, scaled down after losses. Energy is 0.20% of margin per side.
+7. **Manual test preset:** a fixed €2 risk to the stop and a target the same distance away (1:1). It uses a separate paper account. Fees and energy make the realised loss slightly more than €2.
+8. The **next-decision preview** reruns the same pipeline on the forming bar, built from closed 1-minute candles only. It is provisional until the bar closes.
+
 ## Credits
 
 این ارگانیسم توسط سالار خانبابا و با همفکری گروک بات خلق شده است

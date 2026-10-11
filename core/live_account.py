@@ -19,9 +19,12 @@ DATA_DIR = Path(os.getenv("GPM_DATA_DIR", Path.home() / ".local" / "share" / "go
 
 
 class LivePaperAccount:
-    def __init__(self, asset="gold", start_equity=None, cfg=None, path=None, now=None):
-        self.path = Path(path) if path else DATA_DIR / f"live_account_{asset}.json"
+    def __init__(self, asset="gold", start_equity=None, cfg=None, path=None, now=None, fixed_risk_usd=None, rr=None):
+        """fixed_risk_usd/rr: پیش‌تنظیم آزمون دستی (ریسک ثابت دلاری تا استاپ، تارگت = rr × فاصله‌ی استاپ)؛ فایل جدا."""
+        suffix = "_manual" if fixed_risk_usd else ""
+        self.path = Path(path) if path else DATA_DIR / f"live_account_{asset}{suffix}.json"
         self.cfg = cfg
+        self.fixed_risk_usd, self.rr = fixed_risk_usd, rr
         if self.path.exists():
             self.state = json.loads(self.path.read_text(encoding="utf-8"))
         else:
@@ -60,9 +63,13 @@ class LivePaperAccount:
                 d, risk = self.state["pending"]
                 atr = float(feat["ATR"].shift(1).loc[t])
                 usable = min(self.state["equity"], c.capital_cap) if c.capital_cap > 0 else self.state["equity"]
-                p = open_position(cm, usable, d, float(row["Open"]), atr, atr * oc.stop_atr_mult, atr * oc.target_atr_mult,
-                                  risk_frac=risk, index=0, time=t)
+                stop_d = atr * oc.stop_atr_mult
+                tgt_d = stop_d * self.rr if self.fixed_risk_usd else atr * oc.target_atr_mult
+                if self.fixed_risk_usd:
+                    risk = self.fixed_risk_usd / usable if usable > 0 else 0.0
+                p = open_position(cm, usable, d, float(row["Open"]), atr, stop_d, tgt_d, risk_frac=risk, index=0, time=t)
                 pos = {k: (str(v) if k == "open_time" else v) for k, v in p.__dict__.items() if k != "context"}
+                self.state["last_event"] = dict(kind="opened", direction=d, time=str(t), entry=round(p.entry, 2))
             self.state["pending"] = None
             # ۲) گام پوزیشن باز روی همین کندل بسته‌شده
             if pos is not None:
@@ -75,6 +82,7 @@ class LivePaperAccount:
                     self.state["trades"].append(dict(entry_time=P.open_time, exit_time=str(t), direction="LONG" if P.direction > 0 else "SHORT",
                                                      entry=round(P.entry, 2), exit=round(P.exit, 2), reason=P.reason,
                                                      pnl=round(P.pnl, 2), R=round(P.r_multiple, 2)))
+                    self.state["last_event"] = dict(kind="closed", reason=P.reason, time=str(t), pnl=round(P.pnl, 2))
                     pos = None
                 else:
                     pos = {k: (str(v) if k == "open_time" else v) for k, v in P.__dict__.items() if k != "context"}
