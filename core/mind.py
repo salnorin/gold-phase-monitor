@@ -12,6 +12,7 @@ import pandas as pd
 
 from core.brain import Brain, Trade
 from core.config import MAX_RISK_PER_TRADE, OrganismConfig
+from core.ledger import DecisionLedger
 from core.paper import CostModel, open_position, step_position
 from core.market_hours import is_market_open, market_status
 
@@ -144,6 +145,9 @@ class Mind:
         self.equity = self.peak = self.peak_all = self.cfg.start_equity
         self.open_pos = None
         self.journal, self.trades, self.events, self.trust_history = [], [], [], []
+        self.ledger = DecisionLedger()
+        self.energy_spent = 0.0
+        self.gate_regret = 0.0   # EMA آب‌میوه‌ی جهتی که دروازه‌ها وتو کردند (فقط نتایج حل‌شده‌ی گذشته)
 
     def strategy_dirs(self, row, brain_dir):
         dom = max(STATES, key=lambda s: row[f"P_{s}"])
@@ -185,6 +189,7 @@ class Mind:
         return right
 
     def run(self, feat: pd.DataFrame, now=None):
+        from core.ledger import ExitRules
         """now: زمان فعلی (برای حالت زنده)؛ اگر بازار بسته یا داده کهنه باشد، کندل آخر «خواب» است."""
         c, oc = self.cfg, self.cfg.organism
         f = mind_features(feat, c)
@@ -200,6 +205,9 @@ class Mind:
         consec = wins = recovery = last_trade = 0
         pend = []
         out = []
+        arrays = (o, h, l, cl, atr, f.index)
+        rules = ExitRules(oc.target_atr_mult, oc.stop_atr_mult, oc.max_hold_bars)
+        tf = f"{c.bar_hours:g}h"
         for i in range(n):
             row, t = rows[i], f.index[i]
             ctx = {k: row[k] for k in ("P_bull", "P_bear", "P_range", "Oxygen", "Vol_Ratio", "Whale")}
@@ -227,7 +235,12 @@ class Mind:
                 if sp is not None and step_position(self.cm, sp, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t, el[i]):
                     self.update_strategy(s, sp.r_multiple, i)
                     shadow[s] = None
+            # ۲ب) دفتر تصمیم: نتایجی که در این کندل حل شدند → یادگیری دروازه‌ها (وتوی درست = اعتبار)
+            for r in self.ledger.reveal(i):
+                if r["suggested"] and not r["chosen"] and r["option"] != "NO_TRADE":
+                    self.gate_regret = 0.97 * self.gate_regret + 0.03 * r["juice"]
             if pos is not None and step_position(self.cm, pos, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t, el[i]):
+                self.energy_spent += pos.energy
                 self.equity = max(0.0, self.equity + pos.pnl)
                 self.peak = max(self.peak, self.equity)
                 self.peak_all = max(self.peak_all, self.equity)
@@ -291,6 +304,8 @@ class Mind:
             elif row["Oxygen"] < c.low_oxygen: hard = "اکسیژن (نقدینگی) کم"
             else:   # انگیزه فقط وقتی هیچ حدی فعال نیست، و حداکثر ۰٫۰۵ آستانه را نرم می‌کند
                 dom_thr -= c.purpose_max_effect * purpose
+                # پشیمانی دروازه: اگر وتوها برنده‌ها را (پس از انرژی) رد کرده‌اند کمی شل‌تر، وگرنه سخت‌تر؛ حداکثر ±۰٫۰۳
+                dom_thr -= 0.03 * float(np.tanh(self.gate_regret * 5))
                 doubt_thr += c.purpose_max_effect * purpose
             combined = w * intuition + (1 - w) * evidence
             action = "WAIT"
@@ -316,6 +331,9 @@ class Mind:
                     if i < n - 1:
                         pending = (d, self.active, {**ctx, "doubt": doubt, "votes": dict(self.brain.blood.votes)}, risk)
             pend.append((i, regime, intuition, evidence))
+            self.ledger.log(i, t, "NO_TRADE" if action == "WAIT" else action, abs(combined),
+                            {**ctx, "doubt": doubt, "intuition": intuition, "evidence": evidence},
+                            self.active, c.leverage, tf, arrays, rules, self.cm, suggested=d if pos is None else 0)
             out.append(dict(time=t, close=float(cl[i]), P_bull=probs["bull"], P_bear=probs["bear"], P_range=probs["range"],
                             regime=regime, oxygen=float(row["Oxygen"]), vol_ratio=float(row["Vol_Ratio"]),
                             whale=bool(row["Whale"]), intuition=intuition, evidence=evidence, doubt=doubt, trust=w,
