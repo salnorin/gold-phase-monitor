@@ -174,6 +174,8 @@ class Mind:
         rows = f.to_dict("records")
         o, h, l, cl, atr = (f[k].values for k in ("Open", "High", "Low", "Close", "ATR"))
         n = len(f)
+        el = np.r_[c.bar_hours, np.diff(f.index.values).astype("timedelta64[s]").astype(float) / 3600]
+        el = np.clip(el, c.bar_hours, 96)
         pos, pending = None, None
         shadow = {s: None for s in STRATEGIES}
         shadow_pending = {s: None for s in STRATEGIES}
@@ -202,10 +204,10 @@ class Mind:
             # ۲) خروج‌ها؛ یادگیری فقط از معاملات بسته‌شده
             for s in STRATEGIES:
                 sp = shadow[s]
-                if sp is not None and step_position(self.cm, sp, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t):
+                if sp is not None and step_position(self.cm, sp, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t, el[i]):
                     self.update_strategy(s, sp.r_multiple, i)
                     shadow[s] = None
-            if pos is not None and step_position(self.cm, pos, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t):
+            if pos is not None and step_position(self.cm, pos, o[i], h[i], l[i], cl[i], atr[i], oc.max_hold_bars, i, t, el[i]):
                 self.equity = max(0.0, self.equity + pos.pnl)
                 self.peak = max(self.peak, self.equity)
                 self.trades.append(pos)

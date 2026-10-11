@@ -91,10 +91,11 @@ def open_position(cm: CostModel, equity, direction, raw_open, atr, stop_dist, ta
     return p
 
 
-def step_position(cm: CostModel, p: Position, o, h, l, c, atr, max_hold, index=0, time=None):
-    """یک کندل را روی پوزیشن اعمال می‌کند. True اگر بسته شد."""
+def step_position(cm: CostModel, p: Position, o, h, l, c, atr, max_hold, index=0, time=None, hours=None):
+    """یک کندل را روی پوزیشن اعمال می‌کند. True اگر بسته شد.
+    hours: زمان سپری‌شده از کندل قبلی (آخر هفته/تعطیلی → فاندینگ/سواپ بیشتر؛ گپ Open از استاپ عبور می‌کند)."""
     p.bars += 1
-    p.funding += p.qty * c * cm.funding_rate_8h * cm.bar_hours / 8.0
+    p.funding += p.qty * c * cm.funding_rate_8h * (cm.bar_hours if hours is None else hours) / 8.0
     d = p.direction
     adverse = l if d > 0 else h
     favorable = h if d > 0 else l

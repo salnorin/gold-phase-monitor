@@ -73,6 +73,8 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
     pend = np.zeros(N)
     trades = np.zeros(N); wins = np.zeros(N); peak = eq.copy(); maxdd = np.zeros(N)
     lm = cm.liq_move
+    el = np.r_[cm.bar_hours, np.diff(df.index.values).astype("timedelta64[s]").astype(float) / 3600]
+    el = np.clip(el, cm.bar_hours, 96)   # آخر هفته → سواپ بیشتر
     for i in range(a, b):
         # ورود
         op = (pend != 0) & ~inpos & alive
@@ -90,7 +92,7 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
         ip = inpos
         if ip.any():
             bars[ip] += 1
-            cost[ip] += qty[ip] * c[i] * cm.funding_rate_8h * cm.bar_hours / 8
+            cost[ip] += qty[ip] * c[i] * cm.funding_rate_8h * el[i] / 8
             long = d > 0
             first = np.where(long, np.maximum(stop, liq), np.minimum(stop, liq))
             first_is_liq = np.where(long, liq >= stop, liq <= stop)

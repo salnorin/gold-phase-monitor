@@ -39,3 +39,15 @@ def test_funding_accrues_and_leverage_cap():
     assert p.funding > 0
     with pytest.raises(ValueError):
         CostModel(leverage=50)
+
+
+def test_weekend_swap_and_gap_through_stop():
+    cm = CostModel(leverage=20)
+    a = open_position(cm, 10_000, 1, 100, 0.0, 1.0, 5.0, risk_frac=0.01)
+    b = open_position(cm, 10_000, 1, 100, 0.0, 1.0, 5.0, risk_frac=0.01)
+    step_position(cm, a, 100, 100.2, 99.5, 100, 0.0, 48, hours=1)
+    step_position(cm, b, 100, 100.2, 99.5, 100, 0.0, 48, hours=49)
+    assert b.funding > 40 * a.funding
+    # گپ دوشنبه از زیر استاپ: پر شدن در Open، نه در استاپ
+    step_position(cm, b, 97.0, 97.5, 96.8, 97.2, 0.0, 48, hours=49)
+    assert b.reason == "gap_stop" and b.exit <= 97.0
