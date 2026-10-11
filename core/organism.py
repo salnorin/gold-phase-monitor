@@ -20,7 +20,7 @@ class BiologicalOrganism:
         self.brain = None
         self.trades = []
 
-    def build_features(self, raw, warmup: int = 250):
+    def build_features(self, raw, warmup: int = 250, market: str = "cme"):
         """ویژگی‌ها + حذف warm-up (حالت‌های بازگشتی از کندل صفر شروع می‌شوند) + ستون Market_Open."""
         from core.market_hours import open_mask
         df = self.respiration.process_respiration(raw)
@@ -30,7 +30,7 @@ class BiologicalOrganism:
         df = self.optical.calculate_optical_field(df)
         df = self.immune.evaluate_toxicity_and_stress(df)
         bar_h = pd.Series(df.index).diff().median().total_seconds() / 3600 if len(df) > 1 else 1.0
-        df["Market_Open"] = open_mask(df.index, bar_h)
+        df["Market_Open"] = True if market == "24/7" else open_mask(df.index, bar_h)
         return df.iloc[warmup:] if len(df) > warmup * 2 else df
 
     def live_cycle(self, symbol=None, interval=None, lookback_days=None):

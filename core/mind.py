@@ -53,6 +53,9 @@ class MindConfig:
     demote_bars: int = 300
     min_trades_promote: int = 3
     purpose_max_effect: float = 0.05
+    capital_cap: float = 0.0          # سقف سرمایه‌ی قابل استفاده (۰ = بدون سقف)، مثلاً ۱۰ دلار
+    kill_equity: float = 0.0          # توقف کامل وقتی آب‌میوه به این سطح برسد (مثلاً ۷ دلار)
+    market: str = "cme"               # "24/7" برای کریپتو
 
 
 def mind_features(feat: pd.DataFrame, cfg: MindConfig) -> pd.DataFrame:
@@ -197,7 +200,8 @@ class Mind:
                 shadow_pending[s] = None
             if pending is not None and pos is None:
                 d, strat, pctx, risk = pending
-                pos = open_position(self.cm, self.equity, d, o[i], atr[i - 1], atr[i - 1] * oc.stop_atr_mult,
+                usable = min(self.equity, c.capital_cap) if c.capital_cap > 0 else self.equity
+                pos = open_position(self.cm, usable, d, o[i], atr[i - 1], atr[i - 1] * oc.stop_atr_mult,
                                     atr[i - 1] * oc.target_atr_mult, risk_frac=risk, index=i, time=t,
                                     context={**pctx, "strategy": strat})
                 last_trade = i
@@ -260,12 +264,12 @@ class Mind:
             dom_thr, doubt_thr = c.dominance, c.max_doubt
             hard = None
             live_closed = None
-            if now is not None and i == n - 1:
+            if now is not None and i == n - 1 and c.market != "24/7":
                 ok, msg = market_status(t, now, c.bar_hours)
                 live_closed = None if ok else msg
             if live_closed: hard = live_closed
             elif not row.get("Market_Open", is_market_open(t)): hard = "بازار بسته / اولین کندل پس از بازگشایی → خواب"
-            elif self.equity <= 0: hard = "آب‌میوه تمام شد"
+            elif self.equity <= max(0.0, c.kill_equity): hard = f"توقف خودکار: آب‌میوه ≤ {c.kill_equity:g}"
             elif i < rest_until: hard = "استراحت اجباری (حد ضرر/افت سرمایه)"
             elif row["Vol_Ratio"] > c.vol_rest_ratio: hard = "نوسان بیش از ۲ برابر عادی → استراحت"
             elif i < caution_until: hard = "احتیاط: ردپای نهنگ"
