@@ -46,7 +46,8 @@ class LivePaperAccount:
     def trades_frame(self):
         return pd.DataFrame(self.state["trades"])
 
-    def update(self, feat: pd.DataFrame, journal: pd.DataFrame, awake: bool):
+    def update(self, feat: pd.DataFrame, journal: pd.DataFrame, awake: bool, signal=None):
+        """signal: اقدام شیء Decision یگانه برای آخرین کندل (core.decision.live_signal)؛ اگر داده شود بر journal مقدم است."""
         """feat/journal: خروجی Mind روی کندل‌های بسته‌شده. awake: بازار باز و داده‌ی تازه."""
         c = self.cfg
         cm = CostModel(leverage=c.leverage, bar_hours=c.bar_hours)
@@ -88,7 +89,7 @@ class LivePaperAccount:
                     pos = {k: (str(v) if k == "open_time" else v) for k, v in P.__dict__.items() if k != "context"}
             # ۳) سیگنال جدید فقط روی آخرین کندل، فقط بیدار و بازار باز، فقط اگر حساب بالای حد توقف است
             if t == new[-1] and awake and pos is None and t in journal.index and self.state["equity"] > c.kill_equity:
-                a = journal.loc[t, "action"]
+                a = signal if signal is not None else journal.loc[t, "action"]
                 if a in ("LONG", "SHORT") and bool(row.get("Market_Open", True)):
                     self.state["pending"] = [1 if a == "LONG" else -1, float(min(c.max_risk, c.base_risk))]
         self.state["position"] = pos

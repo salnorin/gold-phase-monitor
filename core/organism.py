@@ -34,6 +34,7 @@ class BiologicalOrganism:
         return df.iloc[warmup:] if len(df) > warmup * 2 else df
 
     def live_cycle(self, symbol=None, interval=None, lookback_days=None):
+        """LEGACY — فقط مغز، برای مقایسه. داشبورد و هر مجری از core.decision.organism_decision استفاده می‌کنند."""
         c = self.cfg
         raw = self.respiration.fetch_raw_data(symbol or c.symbol, interval or c.interval, lookback_days or c.lookback_days)
         if raw is None or raw.empty:

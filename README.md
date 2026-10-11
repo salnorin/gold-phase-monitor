@@ -101,6 +101,7 @@ Paper only. No code here places real orders, and Coinbase access is read-only.
    - The black box must not match a recent losing context.
 6. If every gate passes, the action is **LONG** or **SHORT**. Entry is at the next bar's open. Stop = 1.5 ATR and target = 3 ATR (the 20x arena uses tighter bounds). Risk is ≤ 1% of cap, scaled down after losses. Energy is 0.20% of margin per side.
 7. **Manual test preset:** a fixed €2 risk to the stop and a target the same distance away (1:1). It uses a separate paper account. Fees and energy make the realised loss slightly more than €2.
+9. **One decision pipeline:** `core/decision.py` → `organism_decision()` returns one `Decision` per refresh (full mind on PAXG). The signal card, preview gauge, 'با کمک رسول واحد' box, bear lean, status text, live/€2 paper account and ledger all read only that object. `Brain.run`/`live_cycle` are legacy and used only for comparison.
 8. The **next-decision preview** reruns the same pipeline on the forming bar, built from closed 1-minute candles only. It is provisional until the bar closes.
 
 ## Credits

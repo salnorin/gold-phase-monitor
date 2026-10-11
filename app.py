@@ -47,7 +47,7 @@ GOLD = "#e8b931"
 st.markdown(f"""<style>
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap');
 html, body, [class*="css"], .stMarkdown, .stMetric, button, input {{ font-family: {"'Vazirmatn', " if RTL_ON else ""}'Inter', system-ui, sans-serif; }}
-[data-testid='stMainBlockContainer'] {{ padding-top: 1.2rem; max-width: 1300px; }}
+[data-testid='stMainBlockContainer'] {{ padding-top: 3rem; max-width: 1300px; }}
 [data-testid='stMainBlockContainer'] .stMarkdown, [data-testid='stMainBlockContainer'] .stCaption {{ direction: {DIR}; text-align: {"right" if RTL_ON else "left"}; }}
 [data-testid='stMetric'] {{ background: rgba(255,255,255,.035); border: 1px solid rgba(232,185,49,.18); border-radius: 14px; padding: 12px 14px; }}
 [data-testid='stMetricLabel'] {{ opacity: .8; }}
@@ -120,7 +120,7 @@ manual = st.sidebar.toggle(T("manual_preset"), value=False, help=T("manual_help"
 live = st.sidebar.checkbox(T("auto"), value=True)
 
 
-@st.cache_data(ttl=240, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_data(interval):
     from core import gold_price
     raw = gold_price.candles(interval, 3000)        # PAXG-USD: قیمت یگانه‌ی طلا
@@ -157,7 +157,9 @@ def run_arena_cached(raw, cross, interval, pop):
 MOUTH = {"happy": "M96 106 Q110 122 124 106", "sad": "M98 116 Q110 104 122 116", "neutral": "M100 108 Q110 116 120 108"}
 
 
-WARNING_3L = " · ".join(_t("warning3", x) for x in ("fa", "en", "de"))
+def warning_box():
+    st.markdown(f"<div class='card' dir='{DIR}' style='direction:{DIR};text-align:{"right" if RTL_ON else "left"};"
+                f"border:1px solid #f59e0b66;background:#f59e0b14;font-size:.9em'>{T('warning3')}</div>", unsafe_allow_html=True)
 
 
 def creature_svg(breath_s, hue, label, mood="neutral", bias=0, asleep=False):
@@ -187,8 +189,7 @@ def creature_svg(breath_s, hue, label, mood="neutral", bias=0, asleep=False):
   <ellipse cx="110" cy="150" rx="40" ry="30" fill="hsl({hue},40%,62%)"/>
  </g>
  <text x="196" y="40" font-size="34" fill="{COL['LONG'] if bias > 0 else COL['SHORT'] if bias < 0 else COL['WAIT']}">{'↗' if bias > 0 else '↙' if bias < 0 else '→'}</text>
- <text x="110" y="196" text-anchor="middle" font-size="13" fill="#ddd">{label}</text>
-</svg></div>"""
+ </svg></div>"""
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -271,7 +272,7 @@ def paxg_price():
     return gold_price.ticker()
 
 
-@st.cache_data(ttl=50, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def gold_minutes_all():
     from core import gold_price
     try:
@@ -280,38 +281,17 @@ def gold_minutes_all():
         return None
 
 
-def forming_bar(raw, minutes, step):
-    """کندل در حال شکل‌گیری از کندل‌های ۱ دقیقه‌ای *بسته‌شده* پس از آخرین کندل بسته‌ی بازه — بدون نگاه به آینده."""
-    if minutes is None or not len(minutes):
-        return None, None
-    start = raw.index[-1] + step
-    m = minutes[(minutes.index >= start) & (minutes.index < start + step)]
-    if m.empty:
-        return None, start
-    bar = pd.DataFrame(dict(Open=m.Open.iloc[0], High=m.High.max(), Low=m.Low.min(), Close=m.Close.iloc[-1],
-                            Volume=m.Volume.sum()), index=[start])
-    return bar, start
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def provisional_decision(raw, cross, interval, leverage, minutes):
-    """تصمیم موقت ذهن روی کندل در حال شکل‌گیری (همان دروازه‌ها). ممکن است تا بسته شدن کندل تغییر کند."""
-    from core.research import add_cross
-    step = pd.Timedelta(minutes=int(INTERVAL_H[interval] * 60))
-    bar, start = forming_bar(raw, minutes, step)
-    if bar is None:
-        return None
-    ext = pd.concat([raw, bar[raw.columns.intersection(bar.columns)]])
-    feat = BiologicalOrganism().build_features(ext)
-    if cross is not None:
-        feat = add_cross(feat, cross)
+@st.cache_data(ttl=15, show_spinner=False)
+def organism_decision_cached(raw, cross, interval, leverage, manual, wake_bar, minutes, _now_key):
+    """تصمیم یگانه — یک بار در هر تازه‌سازی (کش ۱۵ ثانیه)."""
+    from core.config import MANUAL_TEST_RR
+    from core.decision import organism_decision
     cfg = capital_mind_config(capital(), leverage=float(leverage), bar_hours=INTERVAL_H[interval])
-    jj = Mind(cfg).run(feat)
-    r = jj.iloc[-1]
-    return dict(action=r.action, reason=r.reason, P_bull=float(r.P_bull), P_bear=float(r.P_bear), P_range=float(r.P_range),
-                doubt=float(r.doubt), evidence=float(r.evidence), intuition=float(r.intuition), trust=float(r.trust),
-                dom=cfg.dominance, max_doubt=cfg.max_doubt, start=start, close=start + step, n_min=int(len(bar) and
-                ((minutes.index >= start) & (minutes.index < start + step)).sum()), price=float(bar.Close.iloc[0]))
+    dec, ctx = organism_decision(raw, cfg, pd.Timestamp.now(tz="UTC"), cross=cross, wake_bar=wake_bar,
+                                 wake_interval_h=1 / 60 if wake_bar is not None else None,
+                                 feed_delay_min=FEED_DELAY_MIN if wake_bar is not None else 0.0,
+                                 minutes=minutes, rr=MANUAL_TEST_RR if manual else None)
+    return dec, ctx["feat"], ctx["journal"]
 
 
 def preview_svg(lean, conf, color, pulse_s):
@@ -343,65 +323,70 @@ def gate_bar(label, value, thr, color):
             f"height:8px;border-radius:6px;background:{color}'></div></div></div>")
 
 
-def next_decision_preview(raw, cross, now):
-    pv = provisional_decision(raw, cross, interval, leverage, gold_minutes_all())
+RASOUL_TITLE = "با کمک رسول واحد"   # PLACEHOLDER — منتظر املای نهایی مالک؛ فقط همین ثابت را عوض کنید
+
+
+def advice_box(dec):
+    """«با کمک رسول واحد»: هیچ محاسبه‌ی جداگانه — فقط شیء Decision."""
+    from core.decision import advice_key
+    key = advice_key(dec)
+    col = {"adv_long": COL["LONG"], "adv_short": COL["SHORT"]}.get(key, "#f59e0b")
+    title = RASOUL_TITLE + ("" if L == "fa" else f" · {T('adv_title_tr')}")
+    st.markdown(f"<div class='card' style='border:2px solid {col};background:{col}1a;text-align:center'>"
+                f"<div style='font-size:.95em;opacity:.8'>{title}</div>"
+                f"<div style='font-size:1.8em;font-weight:800;color:{col}'>{T(key)}</div>"
+                f"<div style='font-size:.75em;opacity:.65'>{T('adv_caption')}</div></div>", unsafe_allow_html=True)
+
+
+def next_decision_preview(dec, now):
     st.markdown(f"#### {T('pv_title')}")
-    if pv is None:
+    if not dec.provisional:
         st.caption(T("pv_none")); return
-    left = max(pd.Timedelta(0), pv["close"] - now)
-    act = pv["action"]
-    lean = float(np.clip(pv["P_bull"] - pv["P_bear"], -1, 1))
-    conf = max(pv["P_bull"], pv["P_bear"], pv["P_range"]) * (1 - pv["doubt"])
+    left = max(pd.Timedelta(0), dec.bar_close - now)
     pulse = float(np.clip(left.total_seconds() / 900, 0.5, 3.0))
     c1, c2 = st.columns([1, 1])
     with c1:
-        st.markdown(preview_svg(lean, conf, COL.get(act, COL["WAIT"]), pulse), unsafe_allow_html=True)
+        st.markdown(preview_svg(dec.lean, dec.confidence, COL.get(dec.action, COL["WAIT"]), pulse), unsafe_allow_html=True)
     with c2:
         st.markdown(f"<div class='card' style='border:1px dashed {GOLD}88'>"
-                    f"<div style='font-size:1.5em;font-weight:800;color:{COL.get(act, COL['WAIT'])}'>{act} · {T('pv_badge')}</div>"
-                    f"<div style='opacity:.85'>{T('pv_label', t=f'{pv['close'].tz_convert(BERLIN):%H:%M}', m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60), n=pv['n_min'])}</div>"
-                    + gate_bar("LONG · " + T("pv_bull"), pv["P_bull"], pv["dom"], COL["LONG"])
-                    + gate_bar("SHORT · " + T("pv_bear"), pv["P_bear"], pv["dom"], COL["SHORT"])
-                    + gate_bar(T("pv_doubt"), pv["doubt"], pv["max_doubt"], COL["WAIT"])
-                    + f"<div style='opacity:.75;font-size:.85em;margin-top:6px'>{pv['reason']}</div></div>",
+                    f"<div style='font-size:1.5em;font-weight:800;color:{COL.get(dec.action, COL['WAIT'])}'>{dec.action} · {T('pv_badge')}</div>"
+                    f"<div style='opacity:.85'>{T('pv_label', t=f'{dec.bar_close.tz_convert(BERLIN):%H:%M}', m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60), n=int((now - dec.timestamp).total_seconds() // 60))}</div>"
+                    + gate_bar("LONG · " + T("pv_bull"), dec.P_bull, dec.dominance_thr, COL["LONG"])
+                    + gate_bar("SHORT · " + T("pv_bear"), dec.P_bear, dec.dominance_thr, COL["SHORT"])
+                    + gate_bar(T("pv_doubt"), dec.doubt, dec.max_doubt, COL["WAIT"])
+                    + f"<div style='opacity:.75;font-size:.85em;margin-top:6px'>{dec.reason}</div></div>",
                     unsafe_allow_html=True)
 
 
 @st.fragment(run_every=timedelta(seconds=15) if live else None)
 def live_panel():
-    """پنل زنده (هر ۱۵ ثانیه، بدون بارگذاری کل صفحه): وضعیت بازار، خرس، قیمت، حساب کاغذی زنده، آخرین سیگنال."""
+    """پنل زنده: همه‌چیز از یک شیء Decision (core.decision) — وضعیت، خرس، کارت، پیش‌نمایش، رسول واحد، حساب کاغذی."""
+    from core.decision import live_signal, signal_card, status_key
     from core.live_account import LivePaperAccount
+    now = pd.Timestamp.now(tz="UTC")
+    mins = gold_minute()                                   # GC=F: فقط مرجع آتی + نشان «تأخیر خوراک»
     try:
         raw, cross = get_data(interval)
-        feat, j, trades, bb, explain, events, strat, extra = run_mind(raw, cross, interval, leverage)
+        # باز/بسته از تقویم CME (اصلی) + تازگی کندل‌های PAXG؛ GC=F هرگز وضعیت را «بسته» نمی‌کند
+        dec, feat, j = organism_decision_cached(raw, cross, interval, leverage, manual, None, gold_minutes_all(),
+                                                now.floor("15s"))
+        trades = run_mind(raw, cross, interval, leverage)[2]
     except Exception as e:
         st.error(T("data_fail", e=e)); return
     cap = capital()
-    now = pd.Timestamp.now(tz="UTC")
-    mins = gold_minute()
-    fast = mins.index[-1] if mins is not None else None
-    last = j.iloc[-1]
-    last_bar = max([t for t in (j.index[-1], fast) if t is not None])
-    use_fast = fast is not None and last_bar == fast
-    state, state_reason = status_detail(last_bar, now, 1 / 60 if use_fast else INTERVAL_H[interval],
-                                        feed_delay_min=FEED_DELAY_MIN if use_fast else 0.0)
-    if state == "open" and j.index[-1] < last_bar - pd.Timedelta(minutes=int(INTERVAL_H[interval] * 60)):
-        state_reason += " — " + T("wait_next", iv=interval)
-    awake = state == "open"
-    # حساب کاغذی زنده (از لحظه‌ی ایجاد، روی دیسک)
+    conf_dec = dec.confirmed or dec
+    awake = not dec.asleep
     cfg = capital_mind_config(cap, leverage=float(leverage), bar_hours=INTERVAL_H[interval])
     from core.config import MANUAL_TEST_RISK_EUR, MANUAL_TEST_RR
     acc = LivePaperAccount("gold", cap.usd, cfg, fixed_risk_usd=MANUAL_TEST_RISK_EUR * cap.rate if manual else None,
                            rr=MANUAL_TEST_RR if manual else None)
-    acc.update(feat, j, awake)
+    acc.update(feat, j, awake, signal=live_signal(dec))
     paxg = paxg_price()
     fut = float(mins["Close"].iloc[-1]) if mins is not None else None      # GC=F فقط مرجع
-    price = paxg if paxg else float(last.close)
+    price = paxg if paxg else dec.price
     prev = st.session_state.get("paxg", price) or price
     pos = acc.state["position"]
-    unreal = 0.0
-    if pos:
-        unreal = pos["qty"] * (price - pos["entry"]) * pos["direction"] - pos["fees"] - pos["funding"]
+    unreal = pos["qty"] * (price - pos["entry"]) * pos["direction"] - pos["fees"] - pos["funding"] if pos else 0.0
     lt = acc.trades_frame()
     feeling = "neutral"
     if not lt.empty:
@@ -409,107 +394,104 @@ def live_panel():
     elif not trades.empty and "pnl" in trades and trades["pnl"].notna().any():
         feeling = "happy" if trades["pnl"].dropna().iloc[-1] > 0 else "sad"
     hue = {"happy": 125, "sad": 0, "neutral": 210}[feeling]
-    breath = float(np.clip(4.0 / (max(last.vol_ratio, 0.2) * max(last.oxygen, 0.2) ** 0.5), 0.6, 6.0))
+    breath = float(np.clip(4.0 / (max(dec.vol_ratio, 0.2) * max(dec.oxygen, 0.2) ** 0.5), 0.6, 6.0))
     if feeling == "sad":
         breath = max(breath, 5.5)
     if not awake:
         breath = 7.0
-    mood = {"open": "👀", "closed": "💤", "awaiting": "⏳", "stale": "💤"}[state]
+    mood = {"open": "👀", "closed": "💤", "awaiting": "⏳", "stale": "💤"}[dec.market_state]
     mood += {"happy": " · " + T("mood_happy"), "sad": " · " + T("mood_sad"), "neutral": ""}[feeling]
-    badge = {"open": ("#22c55e", "🟢 " + T("st_open")), "closed": ("#64748b", "⚫ " + T("st_closed")),
-             "awaiting": ("#f59e0b", "🟡 " + T("st_awaiting")), "stale": ("#f59e0b", "🟡 " + T("st_stale"))}[state]
-    live_action = last.action if awake else "WAIT"
-    # بیدار ولی کندل سیگنال هنوز بسته نشده: «بیدار، منتظر بسته شدن کندل بعدی» — نه «خواب»
-    step = pd.Timedelta(minutes=int(INTERVAL_H[interval] * 60))
-    next_close = j.index[-1] + 2 * step
-    while next_close <= now:
-        next_close += step
-    left = next_close - now
-    waiting_bar = awake and live_action == "WAIT" and any(k in str(last.reason) for k in ("خواب", "کهنه", "بسته"))
-    wait_msg = T("awake_wait", iv=interval, t=f"{next_close.tz_convert(BERLIN):%H:%M}",
-                 m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60))
-    reason_txt = wait_msg if waiting_bar else (last.reason if awake else T("no_sig_sleep"))
-    st.markdown(f"<div class='card' style='border:2px solid {badge[0]};background:{badge[0]}1a'>"
-                f"<div style='font-size:1.5em;font-weight:800;color:{badge[0]}'>{T('now_status')}: {badge[1]}</div>"
-                f"<div style='opacity:.85'>{state_reason}</div>"
-                f"<div style='opacity:.75;font-size:.92em'>{T('last_candle', t=f'{pd.Timestamp(last_bar).tz_convert(BERLIN):%Y-%m-%d %H:%M}', now=f'{now.tz_convert(BERLIN):%H:%M:%S}')}</div>"
-                f"<div>{T('action_now')}: <b style='color:{COL[live_action]}'>{live_action}</b> — {reason_txt}</div></div>",
+    colr = {"open": "#22c55e", "closed": "#64748b", "awaiting": "#f59e0b", "stale": "#f59e0b"}[dec.market_state]
+    icon = {"open": "🟢", "closed": "⚫", "awaiting": "🟡", "stale": "🟡"}[dec.market_state]
+    if awake and dec.provisional:
+        left = max(pd.Timedelta(0), dec.bar_close - now)
+        reason_txt = T("awake_wait", iv=interval, t=f"{dec.bar_close.tz_convert(BERLIN):%H:%M}",
+                       m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60))
+    elif awake and any(k in conf_dec.reason for k in ("بسته", "خواب", "کهنه")):
+        reason_txt = T("awake_wait", iv=interval, t=f"{(conf_dec.bar_close + pd.Timedelta(hours=INTERVAL_H[interval])).tz_convert(BERLIN):%H:%M}",
+                       m=int(max(0, (conf_dec.bar_close + pd.Timedelta(hours=INTERVAL_H[interval]) - now).total_seconds()) // 60), s=0)
+    else:
+        reason_txt = conf_dec.reason if awake else T("no_sig_sleep")
+    shown = live_signal(dec)
+    # ===== ۱) وضعیت (یک شیء بازار) =====
+    st.markdown(f"<div class='card' style='border:2px solid {colr};background:{colr}1a'>"
+                f"<div style='font-size:1.4em;font-weight:800;color:{colr}'>{icon} {T(status_key(dec))}</div>"
+                f"<div>{T('action_now')}: <b style='color:{COL[shown]}'>{shown}</b> — {reason_txt}</div>"
+                f"<div style='opacity:.7;font-size:.85em'>{T('last_candle', t=f'{conf_dec.timestamp.tz_convert(BERLIN):%Y-%m-%d %H:%M}', now=f'{now.tz_convert(BERLIN):%H:%M:%S}')}</div></div>",
                 unsafe_allow_html=True)
+    # ===== ۲) با کمک رسول واحد =====
+    advice_box(dec)
+    # ===== ۳) کارت تصمیم (از Decision.confirmed) =====
+    card = signal_card(dec)
+    if card:
+        col = COL[card["action"]]
+        lv = T("sig_levels", e=card["entry"], s=card["stop"], t=card["target"])
+        meta = T("sig_meta", c=card["confidence"], iv=interval, t=f"{card['issued'].tz_convert(BERLIN):%Y-%m-%d %H:%M}",
+                 x=f"{card['expires'].tz_convert(BERLIN):%H:%M}")
+        st.markdown(f"<div class='card' style='border:3px solid {col};background:{col}1f'>"
+                    f"<div style='font-size:2em;font-weight:800;color:{col}'>{card['action']}</div>"
+                    f"<div>{lv}</div><div style='opacity:.85'>{meta}</div></div>", unsafe_allow_html=True)
+    # ===== ۴) قیمت (فقط PAXG) و حساب کاغذی =====
+    a, b, c = st.columns(3)
+    a.metric(T("gold_main"), f"{price:,.2f}", f"{price - prev:+.2f}")
+    b.metric(T("live_acc"), f"{acc.equity + unreal:,.2f}", f"{(acc.equity + unreal) / acc.state['start_equity'] - 1:+.2%}")
+    c.metric(T("open_pnl"), f"{unreal:+,.2f}")
+    st.session_state["paxg"] = paxg
+    # ===== ۵) خرس (SVG جدا) + متن‌ها در ستون جدا؛ روی موبایل زیر هم =====
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown(creature_svg(breath, hue, "", feeling, dec.bias, asleep=dec.asleep), unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<div class='card' style='border:1px solid #ffffff1f'>{T('breath', s=breath)} · {mood}</div>",
+                    unsafe_allow_html=True)
+        ev = acc.state.get("last_event") or {}
+        if pos:
+            txt, col = T("ex_long" if pos["direction"] > 0 else "ex_short"), COL["LONG" if pos["direction"] > 0 else "SHORT"]
+        elif ev.get("kind") == "closed" and pd.Timestamp(ev["time"]) >= conf_dec.timestamp:
+            txt, col = T("ex_closed", r={"target": "TP", "stop": "SL", "gap_stop": "SL", "liquidation": "LIQ", "time": "⏱"}.get(ev["reason"], ev["reason"]),
+                         p=ev["pnl"]), GOLD
+        else:
+            txt, col = T("ex_next", a=T({"LONG": "a_long", "SHORT": "a_short"}.get(dec.action, "a_wait"))), COL.get(dec.action, COL["WAIT"])
+        st.markdown(f"<div class='card' style='text-align:center;font-size:1.35em;font-weight:800;color:{col};border:2px solid {col}55'>"
+                    f"{txt}<div style='font-size:.55em;font-weight:400;opacity:.7'>{T('paper_only')}"
+                    f"{' · ' + T('manual_on') if manual else ''}</div></div>", unsafe_allow_html=True)
+    # ===== ۶) پیش‌نمایش =====
+    if awake:
+        next_decision_preview(dec, now)
     if cap.warning:
         st.warning(cap.warning)
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        bias = int(np.sign(last.evidence)) if awake and abs(last.evidence) >= 0.15 else 0
-        st.markdown(creature_svg(breath, hue, T("breath", s=breath) + " · " + mood, feeling, bias, asleep=not awake),
-                    unsafe_allow_html=True)
-    with c2:
-        a, b, c = st.columns(3)
-        a.metric(T("gold_main"), f"{price:,.2f}", f"{price - prev:+.2f}")
-        b.metric(T("live_acc"), f"{acc.equity + unreal:,.2f}", f"{(acc.equity + unreal) / acc.state['start_equity'] - 1:+.2%}")
-        c.metric(T("open_pnl"), f"{unreal:+,.2f}" if pos else "—", f"{unreal:+.2f}" if pos else None)
-        st.session_state["paxg"] = paxg
-        if fut and paxg:
-            st.caption(T("fut_ref", f=fut, d=fut - paxg, p=fut / paxg - 1))
-        x, y, z = st.columns(3)
-        btc, eth = crypto_ticker("BTC-USD"), crypto_ticker("ETH-USD")
-        old_btc, old_eth = st.session_state.get("btc", btc), st.session_state.get("eth", eth)
-        x.metric("BTC", f"{btc:,.0f}" if btc else "—", f"{btc - old_btc:+.1f}" if btc and old_btc else None)
-        y.metric("ETH", f"{eth:,.1f}" if eth else "—", f"{eth - old_eth:+.2f}" if eth and old_eth else None)
-        st.session_state["btc"], st.session_state["eth"] = btc, eth
-        z.metric(T("live_trades"), len(lt))
-        st.caption(T("cap_line", eur=cap.eur, usd=cap.usd, risk=cap.risk_usd, stop=cap.stop_usd, rate=cap.rate, src=cap.source,
-                     ts=f"{pd.Timestamp(cap.timestamp).tz_convert(BERLIN):%Y-%m-%d %H:%M}"))
-    # ---------- کارت سیگنال (فقط وقتی دروازه‌ی اطمینان بالا باز است) ----------
-    oc = cfg.organism
-    bar_end = j.index[-1] + pd.Timedelta(hours=INTERVAL_H[interval])
-    conf = float(max(last.P_bull, last.P_bear, last.P_range) * (1 - last.doubt))
-    if awake and last.action in ("LONG", "SHORT"):
-        d = 1 if last.action == "LONG" else -1
-        atr = float(feat["ATR"].iloc[-1]); entry = float(last.close)
-        col = COL[last.action]
-        lv = T("sig_levels", e=entry, s=entry - d * atr * oc.stop_atr_mult, t=entry + d * atr * oc.target_atr_mult)
-        meta = T("sig_meta", c=conf, iv=interval, t=f"{bar_end.tz_convert(BERLIN):%Y-%m-%d %H:%M}",
-                 x=f"{(bar_end + pd.Timedelta(hours=INTERVAL_H[interval])).tz_convert(BERLIN):%H:%M}")
-        st.markdown(f"<div class='card' style='border:3px solid {col};background:{col}1f'>"
-                    f"<div style='font-size:2.2em;font-weight:800;color:{col}'>{last.action}</div>"
-                    f"<div>{lv}</div><div style='opacity:.85'>{meta}</div><div style='opacity:.8'>{last.reason}</div></div>",
-                    unsafe_allow_html=True)
-    else:
-        st.markdown(f"<div class='card' style='border:1px solid {COL['WAIT']}66'>"
-                    f"<span style='font-size:1.6em;font-weight:800;color:{COL['WAIT']}'>WAIT</span> — "
-                    f"{reason_txt}</div>", unsafe_allow_html=True)
-    # ---------- کارنامه‌ی تأییدشده ----------
+    warning_box()
+    # ===== جزئیات (جمع‌شده) =====
     n_live = len(lt); win_live = float((lt["pnl"] > 0).mean()) if n_live else 0.0
     pnl_live = float(lt["pnl"].sum()) if n_live else 0.0
     replay_ret = float(j["juice"].iloc[-1] / cap.usd - 1)
-    st.markdown(f"<div class='card' style='opacity:.9;padding:6px 4px'>{T('track', n=n_live, w=win_live, p=pnl_live, r=replay_ret)}</div>",
-                unsafe_allow_html=True)
-    st.warning(WARNING_3L)
+    gc_age = (now - mins.index[-1]).total_seconds() / 60 if mins is not None else None
+    pm = gold_minutes_all()
+    pm_age = (now - pm.index[-1]).total_seconds() / 60 if pm is not None and len(pm) else None
+    bar_age = (now - conf_dec.bar_close).total_seconds() / 60
+    fmt = lambda v: "—" if v is None else f"{v:.0f} min"
+    delayed = gc_age is not None and gc_age > 20
+    with st.expander(T("details")):
+        st.markdown(f"<div class='card' style='padding:4px'>{T('track', n=n_live, w=win_live, p=pnl_live, r=replay_ret)}</div>",
+                    unsafe_allow_html=True)
+        st.caption(dec.market_reason)
+        st.caption(T("feed_ages", p=fmt(pm_age), b=fmt(bar_age), g=fmt(gc_age)) + (f" · 🟠 {T('gc_delayed')}" if delayed else ""))
+        if fut and paxg:
+            st.caption(T("fut_ref", f=fut, d=fut - paxg, p=fut / paxg - 1))
+        st.caption(T("cap_line", eur=cap.eur, usd=cap.usd, risk=cap.risk_usd, stop=cap.stop_usd, rate=cap.rate, src=cap.source,
+                     ts=f"{pd.Timestamp(cap.timestamp).tz_convert(BERLIN):%Y-%m-%d %H:%M}"))
+        x, y, z = st.columns(3)
+        btc, eth = crypto_ticker("BTC-USD"), crypto_ticker("ETH-USD")
+        x.metric("BTC", f"{btc:,.0f}" if btc else "—"); y.metric("ETH", f"{eth:,.1f}" if eth else "—")
+        z.metric(T("live_trades"), len(lt))
+        if conf_dec.reason and card:
+            st.caption(conf_dec.reason)
+        if L != "fa":
+            st.caption(T("note_reasons"))
+        if not lt.empty:
+            st.dataframe(to_berlin(lt.iloc[::-1]), width="stretch")
     if not awake:
         st.info(T("asleep_info"))
-    if L != "fa":
-        st.caption(T("note_reasons"))
-    if not lt.empty:
-        with st.expander(T("live_trades_tbl")):
-            st.dataframe(to_berlin(lt.iloc[::-1]), width="stretch")
-    # ---------- وضعیت معامله‌ی مجری کاغذی (فقط شبیه‌سازی؛ هیچ سفارش واقعی) ----------
-    ev = acc.state.get("last_event") or {}
-    if pos:
-        txt, col = T("ex_long" if pos["direction"] > 0 else "ex_short"), COL["LONG" if pos["direction"] > 0 else "SHORT"]
-    elif ev.get("kind") == "closed" and pd.Timestamp(ev["time"]) >= j.index[-1]:
-        txt, col = T("ex_closed", r={"target": "TP", "stop": "SL", "gap_stop": "SL", "liquidation": "LIQ", "time": "⏱"}.get(ev["reason"], ev["reason"]),
-                     p=ev["pnl"]), GOLD
-    else:
-        nxt = live_action if awake else "WAIT"
-        txt, col = T("ex_next", a=T({"LONG": "a_long", "SHORT": "a_short"}.get(nxt, "a_wait"))), COL.get(nxt, COL["WAIT"])
-    st.markdown(f"<div class='card' style='text-align:center;font-size:1.7em;font-weight:800;color:{col};border:2px solid {col}55'>"
-                f"{txt}<div style='font-size:.45em;font-weight:400;opacity:.7'>{T('paper_only')}"
-                f"{' · ' + T('manual_on') if manual else ''}</div></div>", unsafe_allow_html=True)
-    if awake:
-        try:
-            next_decision_preview(raw, cross, now)
-        except Exception as e:
-            st.caption(f"{T('pv_title')}: — ({type(e).__name__})")
 
 
 @st.fragment(run_every=timedelta(seconds=300) if live else None)   # بخش سنگین: هر ۵ دقیقه
@@ -522,16 +504,16 @@ def dashboard():
         feat, j, trades, bb, explain, events, strat, extra = run_mind(raw, cross, interval, leverage)
     last = j.iloc[-1]
     cap = capital()
-    st.subheader(T("replay_h"))
-    st.caption(T("replay_cap", a=to_berlin(j.iloc[[0]]).index[0], b=to_berlin(j.iloc[[-1]]).index[0], usd=cap.usd))
-    a, b, c, d, e = st.columns(5)
-    a.metric(T("replay_juice"), f"{last.juice:,.2f}", f"{last.juice / cap.usd - 1:+.1%}")
-    b.metric(T("replay_trades"), len(trades))
-    c.metric(T("regime"), f"{regime(last.regime, L)} {max(last.P_bull, last.P_bear, last.P_range):.0%}")
-    d.metric(T("strategy"), last.strategy)
-    e.metric(T("energy"), f"{extra['energy']:,.2f} $", T("energy_delta", p=-extra['energy'] / cap.usd), delta_color="off")
-    st.caption(T("energy_note", f=ENERGY_FEE_PCT, m=T("margin") if ENERGY_FEE_MODE == "margin" else T("notional"), r=2 * ENERGY_FEE_PCT))
-    with st.expander(T("explain"), expanded=False):
+    with st.expander(T("replay_h"), expanded=False):
+        st.caption(T("replay_cap", a=to_berlin(j.iloc[[0]]).index[0], b=to_berlin(j.iloc[[-1]]).index[0], usd=cap.usd))
+        a, b, c, d, e = st.columns(5)
+        a.metric(T("replay_juice"), f"{last.juice:,.2f}", f"{last.juice / cap.usd - 1:+.1%}")
+        b.metric(T("replay_trades"), len(trades))
+        c.metric(T("regime"), f"{regime(last.regime, L)} {max(last.P_bull, last.P_bear, last.P_range):.0%}")
+        d.metric(T("strategy"), last.strategy)
+        e.metric(T("energy"), f"{extra['energy']:,.2f} $", T("energy_delta", p=-extra['energy'] / cap.usd), delta_color="off")
+        st.caption(T("energy_note", f=ENERGY_FEE_PCT, m=T("margin") if ENERGY_FEE_MODE == "margin" else T("notional"), r=2 * ENERGY_FEE_PCT))
+        st.markdown(f"**{T('explain')}**")
         st.markdown(explain)
 
     t1, t2, t3, t6, t4, t5 = st.tabs([T("tab_signals"), T("tab_trades"), T("tab_learning"), T("tab_ledger"), T("tab_memory"), T("tab_crypto")])

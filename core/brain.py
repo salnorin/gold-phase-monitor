@@ -133,8 +133,9 @@ class Brain:
         b.signal = {1: "LONG", -1: "SHORT", 0: "FLAT"}[direction]
         return direction
 
-    # ---------- چرخه کامل ----------
+    # ---------- چرخه کامل (LEGACY) ----------
     def run(self, df: pd.DataFrame):
+        """LEGACY — بک‌تستر فقط-مغز، فقط برای مقایسه (core/evaluate_v3). تصمیم زنده فقط از core.decision.organism_decision."""
         c = self.cfg
         n = len(df)
         o, h, l, cl = (df[k].values for k in ("Open", "High", "Low", "Close"))
