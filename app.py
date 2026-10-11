@@ -193,11 +193,17 @@ def crypto_ticker(product):
         return float(r.json()["price"])
     except Exception:
         try:
-            pair = {"BTC-USD": "XBTUSD", "ETH-USD": "ETHUSD"}[product]
+            pair = {"BTC-USD": "XBTUSD", "ETH-USD": "ETHUSD", "PAXG-USD": "PAXGUSD"}[product]
             js = requests.get("https://api.kraken.com/0/public/Ticker", params={"pair": pair}, timeout=5).json()
             return float(next(iter(js["result"].values()))["c"][0])
         except Exception:
             return None
+
+
+@st.cache_data(ttl=8, show_spinner=False)
+def paxg_price():
+    """PAXG-USD (توکن طلا روی Coinbase، ۲۴/۷) — قیمت سریع و جایگزین؛ آتی طلا نیست و باز بودن بازار طلا را تعیین نمی‌کند."""
+    return crypto_ticker("PAXG-USD")
 
 
 @st.fragment(run_every=timedelta(seconds=15) if live else None)
@@ -225,7 +231,14 @@ def live_panel():
     cfg = capital_mind_config(cap, leverage=float(leverage), bar_hours=INTERVAL_H[interval])
     acc = LivePaperAccount("gold", cap.usd, cfg)
     acc.update(feat, j, awake)
-    price = float(mins["Close"].iloc[-1]) if mins is not None else float(last.close)
+    paxg = paxg_price()
+    price_src = "GC=F ۱ دقیقه (Yahoo، ~۱۰ دقیقه تأخیر)"
+    if mins is not None:
+        price = float(mins["Close"].iloc[-1])
+    elif paxg:
+        price, price_src = paxg, "PAXG-USD (جایگزین؛ توکن طلا، نه آتی)"
+    else:
+        price = float(last.close)
     prev = float(mins["Close"].iloc[-2]) if mins is not None and len(mins) > 1 else price
     pos = acc.state["position"]
     unreal = 0.0
@@ -267,6 +280,13 @@ def live_panel():
         a.metric("قیمت طلا (۱ دقیقه)", f"{price:,.2f}", f"{price - prev:+.2f}")
         b.metric("💼 حساب کاغذی زنده ($)", f"{acc.equity + unreal:,.2f}", f"{(acc.equity + unreal) / acc.state['start_equity'] - 1:+.2%}")
         c.metric("سود/زیان باز", f"{unreal:+,.2f}" if pos else "—", f"{unreal:+.2f}" if pos else None)
+        old_px = st.session_state.get("paxg", paxg)
+        st.metric("🪙 PAXG-USD (توکن طلا، ۲۴/۷ — نه آتی)", f"{paxg:,.2f}" if paxg else "—",
+                  f"{paxg - old_px:+.2f}" if paxg and old_px else None)
+        st.session_state["paxg"] = paxg
+        if paxg and mins is not None:
+            st.caption(f"اسپرد PAXG − GC=F: {paxg - price:+,.2f} $ ({(paxg / price - 1):+.2%}) · منبع قیمت طلا: {price_src}. "
+                       "معاملات ۲۴/۷ PAXG به معنای باز بودن بازار آتی طلا نیست.")
         x, y, z = st.columns(3)
         btc, eth = crypto_ticker("BTC-USD"), crypto_ticker("ETH-USD")
         old_btc, old_eth = st.session_state.get("btc", btc), st.session_state.get("eth", eth)
