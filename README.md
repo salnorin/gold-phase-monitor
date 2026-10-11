@@ -113,3 +113,19 @@ This organism was created by Salar Khanbaba, with Grok Bot as a thinking partner
 Dieser Organismus wurde von Salar Khanbaba in gemeinsamer Überlegung mit Grok Bot erschaffen.
 
 © 2026 Salar Khanbaba
+
+## Organism colony (local, paper only)
+
+`python -m core.colony run --n 8 --max 21 --checks 6 --every 30` starts N organism instances as **separate OS processes on this machine**. Each instance has isolated memory and an `RLIMIT_AS` cap (`rss_limit_mb`). On every check, underperformers (by mean paper return) are terminated, which returns their memory to the OS. Survivors spawn mutated children up to a hard cap of **21**.
+
+The memory monitor tracks per-instance RSS, peak, and the RSS trend (MB/min) over a bounded window, and flags leak suspects. It is available as `python -m core.colony status` and in the dashboard tab **🧬 Colony**.
+
+Remote hosts are refused, and there is never any discovery or self-spreading. Streamlit Cloud doesn't run the colony.
+
+Settings can go in `colony.json`: `max_instances`, `initial`, `rss_limit_mb`, `check_every_s`, `kill_fraction`, `leak_slope_mb_per_min`.
+
+## Repo layout
+- Repo root: the Python app (Streamlit Cloud compatible).
+- `fastpath-go/`: optional Go PAXG top-of-book daemon.
+- `native/`: optional Rust arena hot loop.
+- `make test`, `make native`, `make bench`.
