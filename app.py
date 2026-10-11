@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from core.live_account import DATA_DIR
+from core.config import ENERGY_FEE_PCT, ENERGY_FEE_MODE
 
 from core.arena import run_arena
 from core.mind import FA, Mind, MindConfig, capital_mind_config
@@ -78,7 +80,13 @@ def run_mind(raw, cross, interval, leverage):
         feat = add_cross(feat, cross)
     m = Mind(capital_mind_config(capital(), leverage=float(leverage), bar_hours=INTERVAL_H[interval]))
     j = m.run(feat, now=pd.Timestamp.now(tz="UTC"))
-    return feat, j, m.trades_frame(), m.blackbox_frame(), m.explain(), m.events, m.strat
+    led = m.ledger.frame()
+    try:
+        m.ledger.save(DATA_DIR / f"ledger_{interval}_{leverage:g}x.sqlite")
+    except Exception:
+        pass
+    extra = dict(ledger=led, energy=m.energy_spent, gate_regret=m.gate_regret)
+    return feat, j, m.trades_frame(), m.blackbox_frame(), m.explain(), m.events, m.strat, extra
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -212,7 +220,7 @@ def live_panel():
     from core.live_account import LivePaperAccount
     try:
         raw, cross = get_data(interval)
-        feat, j, trades, bb, explain, events, strat = run_mind(raw, cross, interval, leverage)
+        feat, j, trades, bb, explain, events, strat, extra = run_mind(raw, cross, interval, leverage)
     except Exception as e:
         st.error(f"دریافت داده ناموفق بود: {e}"); return
     cap = capital()
@@ -337,7 +345,7 @@ def dashboard():
     except Exception as e:
         st.error(f"دریافت داده ناموفق بود: {e}"); return
     with st.spinner("ذهن در حال مرور تاریخچه..."):
-        feat, j, trades, bb, explain, events, strat = run_mind(raw, cross, interval, leverage)
+        feat, j, trades, bb, explain, events, strat, extra = run_mind(raw, cross, interval, leverage)
     last = j.iloc[-1]
     cap = capital()
     st.subheader("🕰️ بازپخش تاریخی (backtest replay) — نه حساب زنده")
@@ -348,6 +356,10 @@ def dashboard():
     b.metric("معاملات بازپخش", len(trades))
     c.metric("حالت غالب", f"{FA[last.regime]} {max(last.P_bull, last.P_bear, last.P_range):.0%}")
     d.metric("استراتژی فعال", last.strategy)
+    st.metric("⚡ انرژی مصرف‌شده‌ی بازپخش (کارمزد باز+بستن)", f"{extra['energy']:,.2f} $",
+              f"{-extra['energy'] / cap.usd:.1%} از سرمایه", delta_color="off")
+    st.caption(f"مصرف انرژی: {ENERGY_FEE_PCT:g}٪ از {'مارجین' if ENERGY_FEE_MODE == 'margin' else 'ارزش اسمی'} در هر باز و هر بستن "
+               f"(≈ {2 * ENERGY_FEE_PCT:g}٪ رفت‌وبرگشت)، روی اسلیپیج/کارمزد معمول. عدم معامله انرژی مصرف نمی‌کند.")
     with st.expander("🧠 توضیح کامل تصمیم ذهن", expanded=False):
         st.markdown(explain)
 
@@ -409,6 +421,21 @@ def dashboard():
         st.subheader("دفتر روزنامه‌ی تصمیم‌ها")
         st.dataframe(to_berlin(j.tail(50).iloc[::-1][["action", "reason", "intuition", "evidence", "doubt", "trust", "juice"]]), width="stretch")
         st.download_button("دانلود دفتر (CSV)", j.to_csv().encode("utf-8"), "journal.csv", "text/csv")
+        st.subheader("📓 دفتر تصمیم (همه‌ی گزینه‌ها: LONG / SHORT / NO_TRADE)")
+        led = extra["ledger"]
+        if led.empty:
+            st.info("دفتر خالی است.")
+        else:
+            from core.ledger import summarize
+            st.caption("نتیجه‌ی گزینه‌های انتخاب‌نشده با همان قواعد TP/SL/حداکثر نگهداری (خلاف‌واقع) حل می‌شود؛ "
+                       "یادگیری فقط از نتایج حل‌شده‌ی گذشته. آب‌میوه = سود/زیان با اهرم پس از انرژی، به‌صورت سهم مارجین.")
+            st.markdown("**خروج‌ها و آب‌میوه به تفکیک مدل**")
+            st.dataframe(summarize(led).round(3), width="stretch")
+            show = led.tail(60).iloc[::-1][["time", "option", "chosen", "suggested", "confidence", "model", "tier", "timeframe",
+                                            "exit_time", "exit_reason", "pct", "juice", "energy"]]
+            st.dataframe(show, width="stretch")
+            st.download_button("دانلود دفتر تصمیم (CSV)", led.to_csv(index=False).encode("utf-8"), "decision_ledger.csv", "text/csv")
+            st.caption(f"پشیمانی دروازه‌ها (EMA آب‌میوه‌ی وتوشده‌ها): {extra['gate_regret']:+.3f}")
         st.subheader("رویدادها")
         st.write([e[1] for e in events[-15:]])
         credit_footer()

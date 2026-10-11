@@ -24,10 +24,27 @@ class CostModel:
     base_spread: float = 0.0001       # نیم‌اسپرد پایه ۰٫۰۱٪
     vol_slippage: float = 0.10        # اسلیپیج = ۰٫۱ × (ATR/قیمت)
     bar_hours: float = 1.0
+    energy_pct: float = None          # درصد هر طرف؛ None → از config
+    energy_mode: str = None
+
+    def energy(self, margin, notional):
+        """انرژی مصرفی یک طرف (باز یا بستن)."""
+        base = notional if self.energy_mode == "notional" else margin
+        return base * self.energy_pct / 100.0
+
+    @property
+    def energy_frac_side(self):
+        """انرژی یک طرف به‌صورت سهم از مارجین."""
+        return self.energy_pct / 100.0 * (self.leverage if self.energy_mode == "notional" else 1.0)
 
     def __post_init__(self):
         if not (1.0 <= self.leverage <= MAX_LEVERAGE):
             raise ValueError(f"اهرم باید بین ۱ و {MAX_LEVERAGE} باشد")
+        from core.config import ENERGY_FEE_PCT, ENERGY_FEE_MODE
+        if self.energy_pct is None: self.energy_pct = ENERGY_FEE_PCT
+        if self.energy_mode is None: self.energy_mode = ENERGY_FEE_MODE
+        if self.energy_mode not in ("margin", "notional"):
+            raise ValueError("energy_mode باید margin یا notional باشد")
 
     def slip(self, price, atr):
         return price * self.base_spread + atr * self.vol_slippage
@@ -58,6 +75,7 @@ class Position:
     reason: str = ""
     pnl: float = 0.0
     risk_cash: float = 0.0
+    energy: float = 0.0
 
     @property
     def notional(self):
@@ -83,10 +101,11 @@ def open_position(cm: CostModel, equity, direction, raw_open, atr, stop_dist, ta
         if margin > equity:  # سقف اهرم
             margin = equity
             qty = margin * cm.leverage / entry
-    fee = qty * entry * cm.fee_rate
+    en = cm.energy(margin, qty * entry)
+    fee = qty * entry * cm.fee_rate + en
     liq = entry * (1 - direction * cm.liq_move)
     p = Position(direction, entry, qty, margin, entry - direction * stop_dist, entry + direction * target_dist,
-                 liq, index, time, fees=fee, context=context or {})
+                 liq, index, time, fees=fee, context=context or {}, energy=en)
     p.risk_cash = qty * stop_dist + 2 * fee
     return p
 
@@ -120,11 +139,15 @@ def step_position(cm: CostModel, p: Position, o, h, l, c, atr, max_hold, index=0
     p.exit_index, p.exit_time, p.reason = index, time, why
     if why == "liquidation":
         p.exit = p.liq
+        en = cm.energy(p.margin, p.qty * p.liq)          # بستن اجباری هم انرژی می‌خورد
+        p.energy += en; p.fees += en
         p.pnl = -p.margin - p.fees - p.funding
     else:
         fill = exit_px - d * cm.slip(exit_px, atr)
         p.exit = fill
-        exit_fee = p.qty * fill * cm.fee_rate
+        en = cm.energy(p.margin, p.qty * fill)
+        p.energy += en
+        exit_fee = p.qty * fill * cm.fee_rate + en
         p.fees += exit_fee
         gross = p.qty * (fill - p.entry) * d
         p.pnl = max(gross, -p.margin) - p.fees - p.funding

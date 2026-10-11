@@ -20,6 +20,15 @@ BOUNDS = {  # کران هر ژن
     "w": (-1.0, 1.0), "threshold": (0.05, 0.8), "target": (0.5, 4.0), "stop": (0.3, 3.0),
     "hold": (4, 96), "margin": (0.02, 1.0),
 }
+# ۲۰x: حد سود/ضرر تنگ و نگهداری کوتاه (سود و زیان سریع بسته شوند)؛ آرنا فقط داخل این کران‌ها تکامل می‌یابد
+TIER_BOUNDS = {20.0: {**BOUNDS, "target": (0.6, 2.0), "stop": (0.3, 1.0), "hold": (2, 12)},
+               10.0: {**BOUNDS, "target": (0.8, 3.0), "stop": (0.4, 1.5), "hold": (4, 24)}}
+
+
+def bounds_for(lev):
+    return TIER_BOUNDS.get(float(lev), BOUNDS)
+
+
 GENES = ["w0", "w1", "w2", "w3", "w4", "threshold", "target", "stop", "hold", "margin"]
 
 
@@ -32,36 +41,50 @@ def feature_matrix(feat):
     return f, np.nan_to_num(f[FEATURES].values.astype(float))
 
 
-def random_genomes(n, rng):
+def random_genomes(n, rng, B=BOUNDS):
     g = np.empty((n, len(GENES)))
     g[:, :5] = rng.uniform(*BOUNDS["w"], (n, 5))
     for k, name in enumerate(["threshold", "target", "stop", "hold", "margin"], start=5):
-        lo, hi = BOUNDS[name]
+        lo, hi = B[name]
         g[:, k] = rng.uniform(lo, hi, n) if name != "margin" else np.exp(rng.uniform(np.log(lo), np.log(hi), n))
-    return clip(g)
+    return clip(g, B)
 
 
-def clip(g):
-    g[:, :5] = np.clip(g[:, :5], *BOUNDS["w"])
+def clip(g, B=BOUNDS):
+    g[:, :5] = np.clip(g[:, :5], *B["w"])
     for k, name in enumerate(["threshold", "target", "stop", "hold", "margin"], start=5):
-        g[:, k] = np.clip(g[:, k], *BOUNDS[name])
+        g[:, k] = np.clip(g[:, k], *B[name])
     g[:, 8] = np.round(g[:, 8])
     return g
 
 
-def mutate(parents, n, rng, scale=0.1):
+def mutate(parents, n, rng, scale=0.1, B=BOUNDS):
     idx = rng.integers(0, len(parents), n)
     kids = parents[idx].copy()
-    span = np.array([2] * 5 + [b[1] - b[0] for b in (BOUNDS[k] for k in ["threshold", "target", "stop", "hold", "margin"])])
+    span = np.array([2] * 5 + [b[1] - b[0] for b in (B[k] for k in ["threshold", "target", "stop", "hold", "margin"])])
     kids += rng.normal(0, scale, kids.shape) * span
     # کراس‌اوور یکنواخت با والد دیگر
     other = parents[rng.integers(0, len(parents), n)]
     mask = rng.random(kids.shape) < 0.3
     kids[mask] = other[mask]
-    return clip(kids)
+    return clip(kids, B)
 
 
-def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, risk_cap=None, kill_equity=None):
+def counterfactual_table(df, cm: CostModel):
+    """دفتر تصمیم آرنا: آب‌میوه‌ی LONG/SHORT در هر کندل با قواعد tier (شامل انرژی) و کندلی که نتیجه معلوم شد."""
+    from core.ledger import resolve, tier_rules
+    o, h, l, c, atr = (df[k].values for k in ("Open", "High", "Low", "Close", "ATR"))
+    rules, n = tier_rules(cm.leverage), len(df)
+    juice = np.zeros((n, 2)); at = np.full((n, 2), n + 10**9, dtype=np.int64)
+    for i in range(n):
+        for k, d in enumerate((1, -1)):
+            r = resolve(o, h, l, c, atr, i, d, rules, cm)
+            if r is not None:
+                at[i, k], juice[i, k] = r[0], r[3]
+    return juice, at
+
+
+def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, risk_cap=None, kill_equity=None, cf=None):
     """risk_cap: حداکثر ضرر تا استاپ به‌صورت سهم از سرمایه (مثلاً ۰٫۰۱). kill_equity: زیر این سطح ژنوم حذف می‌شود."""
     """همه‌ی ژنوم‌ها در پنجره‌ی [a, b) با سرمایه‌ی تازه؛ بدون نگاه به آینده (سیگنال در Close، ورود Open بعدی)."""
     o, h, l, c, atr = (df[k].values for k in ("Open", "High", "Low", "Close", "ATR"))
@@ -71,8 +94,9 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, ri
     eq = np.full(N, start_equity); alive = np.ones(N, bool); liquidated = np.zeros(N, bool)
     inpos = np.zeros(N, bool); d = np.zeros(N); entry = np.zeros(N); qty = np.zeros(N); margin = np.zeros(N)
     stop = np.zeros(N); target = np.zeros(N); liq = np.zeros(N); bars = np.zeros(N); cost = np.zeros(N)
-    pend = np.zeros(N)
+    pend = np.zeros(N); energy = np.zeros(N)
     trades = np.zeros(N); wins = np.zeros(N); peak = eq.copy(); maxdd = np.zeros(N)
+    credit = np.zeros(N); declined = np.zeros(N)   # اعتبار «عدم معامله‌ی درست» از دفتر تصمیم
     lm = cm.liq_move
     mopen = df["Market_Open"].values if "Market_Open" in df else np.ones(len(df), bool)
     el = np.r_[cm.bar_hours, np.diff(df.index.values).astype("timedelta64[s]").astype(float) / 3600]
@@ -91,7 +115,9 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, ri
             q = m * cm.leverage / e
             entry[op] = e; qty[op] = q; margin[op] = m; d[op] = dd_
             stop[op] = e - dd_ * atr[i - 1] * sm[op]; target[op] = e + dd_ * atr[i - 1] * tm[op]
-            liq[op] = e * (1 - dd_ * lm); bars[op] = 0; cost[op] = q * e * cm.fee_rate; inpos[op] = True
+            en = cm.energy(m, q * e)
+            energy[op] += en
+            liq[op] = e * (1 - dd_ * lm); bars[op] = 0; cost[op] = q * e * cm.fee_rate + en; inpos[op] = True
         pend[:] = 0
         # خروج
         ip = inpos
@@ -113,8 +139,10 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, ri
             if closing.any():
                 fill = px - d * (px * cm.base_spread + atr[i] * cm.vol_slippage)
                 gross = qty * (fill - entry) * d
-                pnl = np.maximum(gross, -margin) - cost - qty * np.abs(fill) * cm.fee_rate
-                pnl = np.where(liq_hit, -margin - cost, pnl)
+                en_x = cm.energy(margin, qty * np.abs(fill))
+                pnl = np.maximum(gross, -margin) - cost - qty * np.abs(fill) * cm.fee_rate - en_x
+                pnl = np.where(liq_hit, -margin - cost - en_x, pnl)
+                energy[closing] += en_x[closing]
                 eq[closing] += pnl[closing]
                 trades[closing] += 1; wins[closing & (pnl > 0)] += 1
                 inpos[closing] = False
@@ -126,15 +154,23 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, ri
             s = (W @ F[i]) / wnorm
             can = alive & ~inpos & bool(mopen[i])
             pend[can] = np.where(np.abs(s[can]) >= thr[can], np.sign(s[can]), 0)
+            if cf is not None:   # نزدیک‌سیگنال‌های ردشده: فقط اگر نتیجه داخل پنجره (گذشته) حل شده باشد
+                near = can & (pend == 0) & (np.abs(s) >= thr / 2)
+                k = np.where(s > 0, 0, 1)
+                ok = near & (cf[1][i, k] < b)
+                credit[ok] -= cf[0][i, k[ok]]     # ضرر اجتناب‌شده + / برد ازدست‌رفته −
+                declined[ok] += 1
     # پوزیشن باز در پایان پنجره در Close بسته می‌شود
     if inpos.any():   # بستن اجباری در پایان پنجره، با اسلیپیج و کارمزد
         px = c[b - 1] - d * (c[b - 1] * cm.base_spread + atr[b - 1] * cm.vol_slippage)
         gross = qty * (px - entry) * d
-        eq[inpos] += (np.maximum(gross, -margin) - cost - qty * np.abs(px) * cm.fee_rate)[inpos]
+        en_x = cm.energy(margin, qty * np.abs(px))
+        energy[inpos] += en_x[inpos]
+        eq[inpos] += (np.maximum(gross, -margin) - cost - qty * np.abs(px) * cm.fee_rate - en_x)[inpos]
         trades[inpos] += 1
     eq = np.maximum(eq, 0)
     return dict(equity=eq, ret=eq / start_equity - 1, liquidated=liquidated, alive=alive & ~liquidated,
-                trades=trades, win_rate=np.divide(wins, trades, out=np.zeros(N), where=trades > 0), maxdd=maxdd)
+                trades=trades, credit=credit, declined=declined, energy=energy, energy_frac=energy / start_equity, win_rate=np.divide(wins, trades, out=np.zeros(N), where=trades > 0), maxdd=maxdd)
 
 
 def fitness(r, rank="return"):
@@ -144,13 +180,16 @@ def fitness(r, rank="return"):
         score = r["ret"] / (r["maxdd"] + 0.02) * np.sqrt(np.minimum(r["trades"], 50) / 50)
     else:
         score = r["ret"]
+    if "credit" in r:      # اعتبار دفتر تصمیم، کران‌دار (حداکثر ±۰٫۰۵ بازده)
+        score = score + 0.05 * np.tanh(r["credit"] / 10)
     return np.where(surv, score, -np.inf), surv
 
 
-def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0, warmup=250, rank="return", sim_kw=None):
+def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0, warmup=250, rank="return", sim_kw=None, B=None):
     """تکامل walk-forward روی [warmup, is_end): هر نسل روی پنجره‌ی زمانی بعدی."""
     rng = np.random.default_rng(seed)
-    G = random_genomes(pop, rng)
+    B = B or bounds_for(cm.leverage)
+    G = random_genomes(pop, rng, B)
     edges = np.linspace(warmup, is_end, generations + 1).astype(int)
     history = []
     for g in range(generations):
@@ -162,13 +201,13 @@ def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0,
                             median_ret_survivors=float(np.median(r["ret"][surv])) if surv.any() else np.nan,
                             traded=float((r["trades"] > 0).mean())))
         if not surv.any():
-            G = random_genomes(pop, rng); continue
+            G = random_genomes(pop, rng, B); continue
         if g == generations - 1:
             break
         order = np.argsort(-fitness(r, rank)[0])
         n_elite = max(1, min(int(pop * elite_frac), int(surv.sum())))
         elite = G[order[:n_elite]]
-        G = np.vstack([elite, mutate(elite, pop - n_elite, rng)])
+        G = np.vstack([elite, mutate(elite, pop - n_elite, rng, B=B)])
     # بازامتیازدهی نهایی روی کل IS (نه فقط آخرین پنجره) برای انتخاب قهرمانان
     final = simulate_population(G, F, df, edges[0], is_end, cm, **(sim_kw or {}))
     return G, final, pd.DataFrame(history)
@@ -181,7 +220,7 @@ def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1, rank=
         score, surv = fitness(final, rank)
         champs = G[np.argsort(-score)[:min(k, int(surv.sum()))]]
     rc = simulate_population(champs, F, df, a, b, cm, **(sim_kw or {}))
-    R = random_genomes(n_random, rng)
+    R = random_genomes(n_random, rng, bounds_for(cm.leverage))
     rr = simulate_population(R, F, df, a, b, cm, **(sim_kw or {}))
     # توزیع میانه‌ی بازده k ژنوم تصادفی (بوت‌استرپ)
     boots = np.array([np.median(rr["ret"][rng.integers(0, n_random, len(champs))]) for _ in range(2000)])
@@ -202,7 +241,7 @@ def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1, rank=
 
 
 def run_arena(raw, cross_raw=None, interval_hours=1.0, pop=10_000, generations=8, tiers=(20.0, 10.0, 1.0),
-              is_frac=0.7, seed=0, embargo=96):
+              is_frac=0.7, seed=0, embargo=96, use_ledger=True):
     feat = BiologicalOrganism().build_features(raw)
     if cross_raw is not None:
         from core.research import add_cross
@@ -213,8 +252,10 @@ def run_arena(raw, cross_raw=None, interval_hours=1.0, pop=10_000, generations=8
     out = {}
     for lev in tiers:
         cm = CostModel(leverage=lev, bar_hours=interval_hours)
-        G, final, hist = evolve(F, df, is_end, cm, pop=pop, generations=generations, seed=seed)
-        defl, champs = deflation_test(G, final, F, df, oos_start, len(df), cm)
+        kw = dict(cf=counterfactual_table(df, cm)) if use_ledger else None
+        G, final, hist = evolve(F, df, is_end, cm, pop=pop, generations=generations, seed=seed, sim_kw=kw)
+        defl, champs = deflation_test(G, final, F, df, oos_start, len(df), cm, sim_kw=kw)
+        defl["energy_frac_median"] = float(np.median(final["energy_frac"]))
         out[lev] = dict(history=hist, deflation=defl, champions=champs)
     return out, df.index[oos_start]
 
