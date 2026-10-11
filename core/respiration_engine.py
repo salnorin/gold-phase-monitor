@@ -1,122 +1,84 @@
 # core/respiration_engine.py
+"""سیستم تنفسی: فقط از داده‌های تا کندل بسته‌شده‌ی فعلی استفاده می‌کند (بدون نگاه به آینده)."""
 from core.data_feeder import DataFeeder
 import numpy as np
 import pandas as pd
 
 
+def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    prev_close = df["Close"].shift(1)
+    tr = pd.concat([
+        df["High"] - df["Low"],
+        (df["High"] - prev_close).abs(),
+        (df["Low"] - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=1).mean()
+
+
 class RespirationEngine:
-    """سیستم تنفسی ارگانیسم (تنظیم نوسان، ریتم بازار و دریافت داده)"""
-
-    def __init__(self, provider: str = "yfinance", api_key: str = None):
+    def __init__(self, provider: str = "yfinance", api_key: str = None, atr_period: int = 14):
         self.feeder = DataFeeder(provider=provider, api_key=api_key)
+        self.atr_period = atr_period
 
-    def fetch_raw_data(
-        self, symbol: str = "GC=F", interval: str = "1h", lookback_days: int = 60
-    ) -> pd.DataFrame:
-        """دریافت داده‌های خام از لایه DataFeeder"""
-        return self.feeder.fetch(
-            symbol=symbol, interval=interval, lookback_days=lookback_days
-        )
+    def fetch_raw_data(self, symbol="GC=F", interval="1h", lookback_days=60):
+        return self.feeder.fetch(symbol=symbol, interval=interval, lookback_days=lookback_days)
+
+    @staticmethod
+    def _causal_fill(df: pd.DataFrame) -> pd.DataFrame:
+        """فقط ffill (گذشته → حال)؛ bfill حذف شد چون آینده را به گذشته نشت می‌داد."""
+        df = df.copy()
+        for col in df.columns:
+            s = df[col]
+            if s.dtype == bool:
+                df[col] = s.fillna(False)
+            else:
+                df[col] = s.ffill().fillna(0)
+        return df
 
     def process_respiration(self, df: pd.DataFrame) -> pd.DataFrame:
-        """محاسبه تنفس، بازه‌ها، سیگنال‌ها و هموستاتیک نوسانات بازار"""
         if df is None or df.empty:
             return None
-
         df = df.copy()
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index, utc=True).tz_convert("America/New_York")
 
-        # محاسبه بازدهی و نوسان
         df["Returns"] = df["Close"].pct_change()
         df["Log_Return"] = np.log(df["Close"] / df["Close"].shift(1))
-        df["Volatility_Breath"] = df["Log_Return"].rolling(window=10).std() * 100
+        df["Volatility_Breath"] = df["Log_Return"].rolling(10, min_periods=2).std() * 100
+        df["Breath_Radius"] = (df["High"] - df["Low"]) / df["Close"].replace(0, np.nan) * 1000
+        df["ATR"] = compute_atr(df, self.atr_period)
 
-        # Breath_Radius (نسخه ساده‌شده بر اساس نوسان)
-        base_volatility = (df["High"] - df["Low"]) / df["Close"]
-        df["Breath_Radius"] = base_volatility * 1000
+        hour = df.index.hour
+        df["Session_Entropy"] = np.where(hour < 8, 0.7, np.where(hour < 13, 1.2, 1.4))
 
-        # Session Entropy
-        df["Hour"] = df.index.hour
-        df["Session_Entropy"] = np.where(
-            (df["Hour"] >= 0) & (df["Hour"] < 8),
-            0.7,
-            np.where((df["Hour"] >= 8) & (df["Hour"] < 13), 1.2, 1.4),
-        )
+        # میانگین «در حال گسترش» به‌جای میانگین کل سری (که آینده را می‌دید)
+        mean_vol = df["Volatility_Breath"].expanding(min_periods=2).mean().replace(0, np.nan)
+        df["Weighted_Breath"] = (df["Volatility_Breath"] / mean_vol * df["Session_Entropy"]).fillna(1.0)
 
-        # Weighted Breath
-        mean_vol = df["Volatility_Breath"].mean()
-        if pd.isna(mean_vol) or mean_vol == 0:
-            df["Weighted_Breath"] = 1.0
-        else:
-            df["Weighted_Breath"] = (df["Volatility_Breath"] / mean_vol) * df["Session_Entropy"]
+        df["Theta"] = df["Returns"].fillna(0).cumsum() * 50
 
-        # Theta momentum
-        df["Theta"] = df["Returns"].cumsum() * 50
+        baseline = df["Weighted_Breath"].rolling(40, min_periods=1).mean()
+        df["Is_Asleep"] = df["Weighted_Breath"] < baseline * 0.75
+        df["Sleep_Streak"] = df["Is_Asleep"].astype(int).groupby((~df["Is_Asleep"]).cumsum()).cumsum()
 
-        # Sleep / Recovery
-        baseline = df["Weighted_Breath"].rolling(window=40, min_periods=1).mean()
-        df["Is_Asleep"] = df["Weighted_Breath"] < (baseline * 0.75)
-        df["Sleep_Streak"] = (
-            df["Is_Asleep"].groupby((~df["Is_Asleep"]).cumsum()).cumsum()
-        )
+        # تب ویروسی: کندل قبلی اوج تنفس + حجم بالا بود و کندل فعلی (بسته‌شده) فروکش کرد.
+        # قبلاً از shift(-1) یعنی کندل بعدی استفاده می‌شد = نگاه به آینده.
+        vol_ma = df["Volume"].rolling(20, min_periods=1).mean()
+        high_th = df["Weighted_Breath"].rolling(200, min_periods=20).quantile(0.85)
+        prev_breath = df["Weighted_Breath"].shift(1)
+        spike_prev = (prev_breath > high_th.shift(1)) & (df["Volume"].shift(1) > vol_ma.shift(1) * 1.5)
+        df["Viral_Fever"] = (spike_prev & (df["Weighted_Breath"] < prev_breath * 0.85)).fillna(False)
+        df["Slaughter_Zone"] = df["Viral_Fever"]
 
-        # Viral Fever / Slaughter Zone (Short)
-        vol_ma = df["Volume"].rolling(window=20, min_periods=1).mean()
-        high_th = df["Weighted_Breath"].quantile(0.85)
-
-        df["Viral_Fever"] = (
-            (df["Weighted_Breath"] > high_th)
-            & (df["Volume"] > vol_ma * 1.5)
-            & (df["Weighted_Breath"].shift(-1) < df["Weighted_Breath"] * 0.85)
-        )
-        df["Slaughter_Zone"] = df["Viral_Fever"].fillna(False)
-
-        # Long Zone
         df["Long_Zone"] = (
-            (df["Is_Asleep"].shift(1) == True)
+            df["Is_Asleep"].shift(1, fill_value=False)
             & (df["Weighted_Breath"] > baseline)
             & (df["Theta"].diff() > 0)
         ).fillna(False)
 
-        # Signal tracking
-        df["Signal_Attempted"] = np.where(df["Slaughter_Zone"] | df["Long_Zone"], 1, 0)
+        df = self._causal_fill(df)
+        return df.dropna(subset=["Close"])
 
-        # Target & Stop
-        df["Target_Price"] = np.where(
-            df["Slaughter_Zone"],
-            df["Close"] - (df["Weighted_Breath"] * 1.5),
-            np.where(df["Long_Zone"], df["Close"] + (df["Weighted_Breath"] * 1.5), 0),
-        )
-        df["Stop_Loss"] = np.where(
-            df["Slaughter_Zone"],
-            df["High"] + (df["Close"] * 0.003),
-            np.where(df["Long_Zone"], df["Low"] - (df["Close"] * 0.003), 0),
-        )
-
-        # Simple success approximation
-        df["Future_Return_5C"] = df["Close"].shift(-5) - df["Close"]
-        df["Signal_Success"] = np.where(
-            (df["Slaughter_Zone"] & (df["Future_Return_5C"] < 0))
-            | (df["Long_Zone"] & (df["Future_Return_5C"] > 0)),
-            1,
-            0,
-        )
-
-        # Fill NaNs safely (compatible with all recent pandas versions)
-        try:
-            df = df.bfill().ffill()
-        except Exception:
-            df = df.fillna(method="bfill").fillna(method="ffill")
-        df = df.fillna(0)
-        df = df.dropna(subset=["Close"])
-        return df
-
-    def fetch_and_process(
-        self, symbol: str = "GC=F", interval: str = "1h", lookback_days: int = 60
-    ) -> pd.DataFrame:
-        """متد ترکیبی برای دریافت و تنفس هم‌زمان"""
-        df = self.fetch_raw_data(
-            symbol=symbol, interval=interval, lookback_days=lookback_days
-        )
-        if df is None:
-            return None
-        return self.process_respiration(df)
+    def fetch_and_process(self, symbol="GC=F", interval="1h", lookback_days=60):
+        df = self.fetch_raw_data(symbol=symbol, interval=interval, lookback_days=lookback_days)
+        return None if df is None else self.process_respiration(df)

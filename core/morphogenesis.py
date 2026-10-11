@@ -1,49 +1,32 @@
 import importlib
 import os
+import re
 
 
 class MorphogenesisManager:
-  """مدیر تکامل و ریخت‌زایی (تولد ارگان‌های جدید بر اساس نیاز محیطی)"""
+    """مدیر ریخت‌زایی. نوشتن و اجرای کد دلخواه به‌صورت پیش‌فرض غیرفعال است (ریسک اجرای کد)."""
 
-  def __init__(self, organs_dir="core/organs"):
-    self.organs_dir = organs_dir
-    os.makedirs(self.organs_dir, exist_ok=True)
-    self.active_organs = {}
+    ENV_FLAG = "GPM_ALLOW_DYNAMIC_ORGANS"
 
-  def spawn_new_organ(self, organ_name, organ_code_string):
-    """
-    تولد یک ارگان جدید: کد پایتون آن را روی دیسک می‌نویسد،
-    آن را بارگذاری کرده و به عنوان عضو جدید به ارگانیسم پیوند می‌زند.
-    """
-    file_path = os.path.join(self.organs_dir, f"{organ_name}.py")
+    def __init__(self, organs_dir="core/organs"):
+        self.organs_dir = organs_dir
+        self.active_organs = {}
 
-    # ۱. تولید کالبد فیزیکی ارگان (نوشتن فایل کد روی دیسک)
-    with open(file_path, "w", encoding="utf-8") as f:
-      f.write(organ_code_string)
+    def spawn_new_organ(self, organ_name, organ_code_string):
+        if os.getenv(self.ENV_FLAG) != "1":
+            raise PermissionError(
+                "spawn_new_organ غیرفعال است: اجرای کد دلخواه خطرناک است. "
+                f"فقط برای توسعه‌ی محلی با {self.ENV_FLAG}=1 فعال کنید."
+            )
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", organ_name):
+            raise ValueError("نام ارگان نامعتبر است")
+        os.makedirs(self.organs_dir, exist_ok=True)
+        with open(os.path.join(self.organs_dir, f"{organ_name}.py"), "w", encoding="utf-8") as f:
+            f.write(organ_code_string)
+        module = importlib.import_module(f"core.organs.{organ_name}")
+        instance = getattr(module, organ_name)()
+        self.active_organs[organ_name] = instance
+        return instance
 
-    # ۲. بارگذاری پویا و زنده کردن ارگان (Dynamic Import)
-    module_name = f"core.organs.{organ_name}"
-    if module_name in globals():
-      module = importlib.reload(globals()[module_name])
-    else:
-      module = importlib.import_module(module_name)
-
-    # ۳. متولد کردن کلاس ارگان
-    organ_class = getattr(module, organ_name)
-    new_organ_instance = organ_class()
-
-    # ۴. اتصال به شبکه عصبی ارگانیسم
-    self.active_organs[organ_name] = new_organ_instance
-    print(
-        f"✨ [تکامل پویا]: ارگان جدیدِ '{organ_name}' با موفقیت متولد شد و به"
-        " شبکه متصل گردید!"
-    )
-    return new_organ_instance
-
-  def run_all_organs(self, market_data):
-    """اجرای هم‌زمان تمام ارگان‌های بدن (قدیمی و جدید)"""
-    results = {}
-    for name, organ in self.active_organs.items():
-      if organ.is_active:
-        results[name] = organ.process(market_data)
-    return results
+    def run_all_organs(self, market_data):
+        return {n: o.process(market_data) for n, o in self.active_organs.items() if o.is_active}

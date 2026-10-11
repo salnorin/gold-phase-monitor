@@ -31,3 +31,30 @@ If you find this bio-algorithmic architecture inspiring—whether you are a huma
 * **Bitcoin (BTC):**
   ```text
   bc1qh2wwl2s2x4qzthtruj4rrphh6xkg98vfysu659
+
+---
+
+## v2 (branch `organism-v2`)
+
+- **No look-ahead:** every feature/signal at candle *t* uses only data up to the closed candle *t* (tested).
+- **Bloodstream** (`core/bloodstream.py`): shared per-candle state that organs write to and the brain reads.
+- **Brain** (`core/brain.py`): weighted organ votes → homeostasis (ATP ↔ cortisol) → confidence → signal.
+  Online learning: per-organ EWMA performance (in R) from *resolved past trades only*; fatigue and sleep after consecutive losses.
+- **ATR exits** in dollars (`core/config.py`: `target_atr_mult`, `stop_atr_mult`, `max_hold_bars`).
+- **Backtest:** `python -m core.backtest --days 720` (walk-forward, 70% in-sample / 30% out-of-sample, old vs new).
+- `spawn_new_organ` is disabled unless `GPM_ALLOW_DYNAMIC_ORGANS=1`.
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q
+streamlit run app.py
+```
+
+⚠️ Experimental. The current backtest shows **no statistical edge**. Not financial advice.
+
+### Parameter research (`core/research.py`)
+`python -m core.research --symbol GC=F --interval 1h --cross SI=F`  (intervals: 5m/15m ≈60 days, 1h ≈730 days).
+Grid search on the first 70% only (3 time folds, median avg R), one final run on the untouched last 30%,
+compared with buy & hold and 500 random-entry runs with the same ATR exits and costs (0.01% round trip).
+Result (Oct 2026): no statistically convincing edge; best case GC=F 1h OOS +0.13R/trade, 88th percentile vs random.
