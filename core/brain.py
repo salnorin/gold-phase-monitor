@@ -115,7 +115,9 @@ class Brain:
         b.score = sum(b.weights[k] * b.votes[k] for k in ORGANS) / total_w
         b.confidence = abs(b.score) * (b.effective_atp / 100) * (1 - b.effective_cortisol / 100) * (1 - b.fatigue)
         direction = 0
-        if b.sleeping_bars > 0:
+        if not row.get("Market_Open", True):
+            b.reason = "بازار بسته / اولین کندل پس از بازگشایی"
+        elif b.sleeping_bars > 0:
             b.reason = f"خواب/ریکاوری پس از ضررهای پیاپی ({b.sleeping_bars} کندل مانده)"
         elif b.atp < c.atp_floor or b.cortisol > c.cortisol_ceiling:
             b.reason = "انرژی کم یا استرس بالا"

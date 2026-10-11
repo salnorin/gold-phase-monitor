@@ -3,3 +3,6 @@ yfinance==1.7.0
 pandas==2.2.3
 numpy==2.5.4
 plotly==7.1.0
+exchange_calendars==4.13.2
+coinbase-advanced-py==1.8.4
+requests==2.34.2

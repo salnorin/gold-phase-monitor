@@ -19,6 +19,7 @@ from core.brain import Brain
 from core.config import OrganismConfig
 from core.organism import BiologicalOrganism
 
+BAR_HOURS = {"1m": 1 / 60, "5m": 5 / 60, "15m": 0.25, "30m": 0.5, "1h": 1.0, "1d": 24.0}
 PERIOD = {"1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d", "1d": "max"}
 
 GRID = {
@@ -43,19 +44,25 @@ def load(symbol, interval, csv_dir=None):
             df.columns = df.columns.get_level_values(0)
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
     df.index = pd.to_datetime(df.index, utc=True).tz_convert("America/New_York")
-    return df
+    from core.market_hours import drop_forming_candle
+    return drop_forming_candle(df, BAR_HOURS[interval])
 
 
-def add_cross(feat, cross_raw, lookback=4):
+def add_cross(feat, cross_raw, lookback=4, tolerance=None):
     """رأی متقاطع علّی: z-score بازده lookback کندلی نماد دیگر، فقط کندل‌های بسته‌شده (merge_asof به عقب)."""
     c = cross_raw["Close"]
     r = np.log(c / c.shift(lookback))
     z = (r / r.rolling(200, min_periods=20).std()).rename("cz").to_frame()
     m = pd.merge_asof(feat[[]].reset_index(), z.reset_index(), left_on=feat.index.name or "index",
-                      right_on=z.index.name or "index", direction="backward")
+                      right_on=z.index.name or "index", direction="backward",
+                      tolerance=tolerance if tolerance is not None else _bar_len(feat.index))
     feat = feat.copy()
     feat["Cross_Drive"] = np.tanh(m["cz"].fillna(0).values / 2)
     return feat
+
+
+def _bar_len(idx):
+    return pd.Series(idx).diff().median() if len(idx) > 1 else pd.Timedelta(hours=1)
 
 
 def make_cfg(base, p):
@@ -102,7 +109,9 @@ def random_baseline(feat, n_trades, cfg, start, n_runs=500, seed=0):
         k = min(len(pos) - 1, max(1, n_trades * 3))  # بیش‌نمونه چون ورودها روی هم نمی‌افتند
         d[rng.choice(pos[:-1], k, replace=False)] = rng.choice([-1, 1], k)
         tr = simulate(feat, d, c + d * a * cfg.target_atr_mult, np.where(d != 0, c - d * a * cfg.stop_atr_mult, 0),
-                      cfg.max_hold_bars, cfg.cost_frac)[:n_trades] if n_trades else []
+                      cfg.max_hold_bars, cfg.cost_frac) if n_trades else []
+        if len(tr) > n_trades:   # زیرنمونه‌ی تصادفی (نه اولین‌ها → بدون سوگیری به ابتدای OOS)
+            tr = [tr[k] for k in sorted(rng.choice(len(tr), n_trades, replace=False))]
         m = metrics(tr); tot.append(m["total_R"]); pf.append(m["avg_R"])
     return np.array(tot), np.array(pf)
 
@@ -114,15 +123,18 @@ def run(symbol, interval, cross=None, csv_dir=None, is_frac=0.7, workers=None):
         feat = add_cross(feat, load(cross, interval, csv_dir))
     cut = feat.index[int(len(feat) * is_frac)]
     base = OrganismConfig()
+    # جستجو فقط روی IS (معاملات باز در پایان IS در فولد آخر شمرده نمی‌شوند چون Brain روی همان برش اجرا می‌شود)
     best, table = search(feat[feat.index < cut], base, workers=workers)
     cfg = make_cfg(base, best)
     _, trades = Brain(cfg).run(feat)                      # یک بار، روی کل داده (آنلاین)
-    is_m = metrics([t for t in trades if t.signal_time < cut])
-    oos_tr = [t for t in trades if t.signal_time >= cut]
+    # purge: معاملات IS که بعد از cut بسته می‌شوند حذف؛ embargo: OOS از cut + max_hold شروع می‌شود
+    emb = feat.index[min(len(feat) - 1, feat.index.get_loc(cut) + cfg.max_hold_bars)]
+    is_m = metrics([t for t in trades if t.exit_time is not None and t.exit_time < cut])
+    oos_tr = [t for t in trades if t.signal_time >= emb]
     oos_m = metrics(oos_tr)
-    default_oos = metrics([t for t in Brain(base).run(feat)[1] if t.signal_time >= cut])
-    tot, avg = random_baseline(feat, len(oos_tr), cfg, cut)
-    oos_close = feat.loc[feat.index >= cut, "Close"]
+    default_oos = metrics([t for t in Brain(base).run(feat)[1] if t.signal_time >= emb])
+    tot, avg = random_baseline(feat, len(oos_tr), cfg, emb)
+    oos_close = feat.loc[feat.index >= emb, "Close"]
     bh = 100 * (oos_close.iloc[-1] / oos_close.iloc[0] - 1)
     return dict(symbol=symbol, interval=interval, cross=cross, bars=len(feat), start=feat.index[0], cut=cut,
                 end=feat.index[-1], best=best, is_metrics=is_m, oos_metrics=oos_m, default_oos=default_oos,

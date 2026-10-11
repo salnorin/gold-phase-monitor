@@ -58,3 +58,41 @@ streamlit run app.py
 Grid search on the first 70% only (3 time folds, median avg R), one final run on the untouched last 30%,
 compared with buy & hold and 500 random-entry runs with the same ATR exits and costs (0.01% round trip).
 Result (Oct 2026): no statistically convincing edge; best case GC=F 1h OOS +0.13R/trade, 88th percentile vs random.
+
+---
+
+## v3 — Mind layer & selection arena (branch `organism-v3`) — PAPER / SIMULATION ONLY
+
+No real orders, no exchange keys, no live trading code. See [PRINCIPLES.md](PRINCIPLES.md).
+
+- `core/mind.py` — juice (paper equity), risk scaling with hard limits (4 losses, 10% drawdown, vol > 2× normal → rest),
+  whale caution (volume / huge-candle spikes), liquidity as oxygen, bounded survival drive, black box of mistakes
+  (similar-context re-entry block), strategy pool with shadow paper trades and promote/demote, intuition vs evidence
+  with doubt and per-regime trust, bull/bear/range probabilities (act only when one dominates), SQLite/CSV journal.
+- `core/paper.py` — harsh leverage sim: 20× = 5% isolated margin, liquidation at 4.5% adverse (wick-checked on High/Low),
+  fees on notional, funding per elapsed hour (weekend swap), volatility-scaled spread/slippage, gap-through-stop, no averaging down.
+- `core/arena.py` — vectorized walk-forward evolution of up to 10,000 genomes in 20× / 10× / spot tiers; liquidated genomes die,
+  survivors replicate with bounded mutation; champions vs random genomes + one OOS re-test (multiple-testing control).
+- `core/market_hours.py` — CME Globex hours (Chicago time), CME holidays, first bar after reopen blocked, stale data → sleep.
+- `core/evaluate_v3.py` — ablations, ranking modes (20× survival vs spot risk-adjusted + ¼ Kelly), block-bootstrap Monte Carlo.
+- Dashboard: breathing bear (breath ≈ volatility/oxygen, colour ≈ juice), signal feed, paper trades, learning curves, memory.
+
+```bash
+pytest -q
+python -m core.evaluate_v3 --pop 10000          # results in results/v3_eval_1h.txt
+streamlit run app.py
+```
+
+Honest result (Oct 2026, GC=F 1h): no edge. With realistic perp-style costs the mind loses ~0.3–0.5 R per trade;
+evolved champions lose less than random genomes OOS (~98th percentile) but still lose money.
+
+## Credits
+Built by Intelgy (AI assistant) with co-creator salnorin. See [AUTHORS](AUTHORS).
+
+## Crypto section (paper only) — `core/crypto.py`, `core/defi.py`, `core/whales.py`
+- BTC-USD / ETH-USD hourly candles from Coinbase Exchange public API (no key), 24/7 market.
+- Same organs, mind and arena (spot / 10× / 20× tiers) with hard rules: $10 virtual cap, ≤1% risk per trade, auto-stop at $7.
+- DeFi oxygen from DefiLlama free API (TVL 7d change, stablecoin supply 7d change, DEX volume vs 30d median), lagged one day.
+- Whale feeds: free candle-based proxy (always on); Arkham Intelligence adapter activates only if `ARKHAM_API_KEY` is set.
+- Read-only Coinbase CDP portfolio view (`ReadOnlyCoinbase` exposes only list accounts/portfolios). Key is read from
+  `~/.secrets/coinbase_cdp.json`, never committed. **No order, transfer or withdrawal code exists in this repo** (tested).

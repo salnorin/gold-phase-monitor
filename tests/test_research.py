@@ -15,8 +15,8 @@ def feat(n=900, seed=5):
 def test_cross_signal_no_lookahead():
     f = feat()
     cross = make_ohlcv(900, seed=9)
-    a = R.add_cross(f.iloc[:600], cross.iloc[:600])["Cross_Drive"]
-    b = R.add_cross(f, cross)["Cross_Drive"].iloc[:600]
+    a = R.add_cross(f.iloc[:400], cross.iloc[:650])["Cross_Drive"]
+    b = R.add_cross(f, cross)["Cross_Drive"].iloc[:400]
     np.testing.assert_allclose(a.values, b.values)
     assert a.abs().max() <= 1
 

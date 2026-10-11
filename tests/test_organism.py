@@ -23,7 +23,9 @@ def test_features_no_lookahead():
     raw = make_ohlcv(800, seed=1)
     k = 500
     short, full = features(raw.iloc[:k]), features(raw)
-    pd.testing.assert_frame_equal(short[COLS], full[COLS].iloc[:k], check_dtype=False)
+    idx = short.index.intersection(full.index)
+    assert len(idx) > 200
+    pd.testing.assert_frame_equal(short.loc[idx, COLS], full.loc[idx, COLS], check_dtype=False)
 
 
 def test_brain_signals_no_lookahead():
@@ -34,7 +36,7 @@ def test_brain_signals_no_lookahead():
     a, _ = Brain(cfg).run(features(raw.iloc[:k]))
     b, _ = Brain(cfg).run(features(raw))
     cols = ["Signal_Dir", "score", "confidence", "fatigue", "Weight_respiration", "Target_Price"]
-    pd.testing.assert_frame_equal(a[cols], b[cols].iloc[:k])
+    pd.testing.assert_frame_equal(a[cols], b.loc[a.index, cols])
 
 
 def test_signals_exist_on_synthetic():

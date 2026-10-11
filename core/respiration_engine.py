@@ -52,10 +52,10 @@ class RespirationEngine:
         df["Session_Entropy"] = np.where(hour < 8, 0.7, np.where(hour < 13, 1.2, 1.4))
 
         # میانگین «در حال گسترش» به‌جای میانگین کل سری (که آینده را می‌دید)
-        mean_vol = df["Volatility_Breath"].expanding(min_periods=2).mean().replace(0, np.nan)
+        mean_vol = df["Volatility_Breath"].rolling(500, min_periods=50).mean().replace(0, np.nan)
         df["Weighted_Breath"] = (df["Volatility_Breath"] / mean_vol * df["Session_Entropy"]).fillna(1.0)
 
-        df["Theta"] = df["Returns"].fillna(0).cumsum() * 50
+        df["Theta"] = df["Returns"].fillna(0).rolling(50, min_periods=1).sum() * 50
 
         baseline = df["Weighted_Breath"].rolling(40, min_periods=1).mean()
         df["Is_Asleep"] = df["Weighted_Breath"] < baseline * 0.75
