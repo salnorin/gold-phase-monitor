@@ -22,9 +22,9 @@ def test_genomes_bounded():
 def test_20x_all_in_gets_liquidated_on_crash():
     idx = pd.date_range("2026-01-01", periods=6, freq="h", tz="America/New_York")
     df = pd.DataFrame({"Open": [100, 100, 100, 100, 100, 100], "High": [100.1] * 6,
-                       "Low": [99.9, 99.9, 99.9, 94.0, 99.9, 99.9], "Close": [100] * 6, "ATR": [0.5] * 6}, index=idx)
+                       "Low": [99.9, 99.9, 99.9, 94.0, 99.9, 99.9], "Close": [100] * 6, "ATR": [2.0] * 6}, index=idx)
     F = np.tile([1, 0, 0, 0, 0], (6, 1)).astype(float)
-    g = np.array([[1, 0, 0, 0, 0, 0.1, 4.0, 3.0, 96, 1.0]])  # لانگ، استاپ دور (1.5$) ولی مارجین کامل
+    g = np.array([[1, 0, 0, 0, 0, 0.1, 4.0, 3.0, 96, 1.0]])  # لانگ، استاپ 6$ (فراتر از لیکوئید 4.5%)، مارجین کامل
     r20 = A.simulate_population(g, F, df, 1, 6, CostModel(leverage=20))
     r1 = A.simulate_population(g, F, df, 1, 6, CostModel(leverage=1))
     assert r20["liquidated"][0] and not r20["alive"][0]
