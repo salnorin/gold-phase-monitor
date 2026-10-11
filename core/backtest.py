@@ -12,7 +12,7 @@ from core.organism import BiologicalOrganism
 from core.legacy import legacy_signals
 
 
-def simulate(df, dirs, targets, stops, max_hold):
+def simulate(df, dirs, targets, stops, max_hold, cost_frac=0.0):
     """شبیه‌ساز عمومی: سیگنال در Close کندل i، ورود Open کندل i+1. فاصله‌ی تارگت/استاپ حفظ می‌شود."""
     o, h, l, c = (df[k].values for k in ("Open", "High", "Low", "Close"))
     trades, i, n = [], 0, len(df)
@@ -24,7 +24,7 @@ def simulate(df, dirs, targets, stops, max_hold):
         t_dist, s_dist = (targets[i] - c[i]) * d, (c[i] - stops[i]) * d
         if t_dist <= 0 or s_dist <= 0:
             i += 1; continue
-        tr = Trade(d, df.index[i], df.index[i + 1], entry, entry + d * t_dist, entry - d * s_dist, s_dist, {})
+        tr = Trade(d, df.index[i], df.index[i + 1], entry, entry + d * t_dist, entry - d * s_dist, s_dist, {}, cost_frac * entry)
         j, held = i + 1, 0
         while j < n:
             held += 1
@@ -34,8 +34,8 @@ def simulate(df, dirs, targets, stops, max_hold):
             j += 1
         if tr.exit is None:
             break  # تا انتهای داده باز ماند → شمرده نمی‌شود
-        trades.append(tr); i = j + 1 if j > i + 1 else i + 1
-        i = max(i, j)
+        trades.append(tr)
+        i = j  # پس از خروج، از همان کندل دوباره می‌تواند سیگنال بگیرد (مثل Brain)
     return trades
 
 
@@ -45,9 +45,9 @@ def metrics(trades):
     r = np.array([t.r_multiple for t in trades])
     eq = np.cumsum(r); dd = np.max(np.maximum.accumulate(np.concatenate([[0], eq]))[1:] - eq)
     gains, losses = r[r > 0].sum(), -r[r <= 0].sum()
-    return dict(trades=len(r), win_rate=round(100 * (r > 0).mean(), 1), avg_R=round(r.mean(), 3),
-                profit_factor=round(gains / losses, 2) if losses > 0 else float("inf"),
-                max_dd_R=round(max(dd, 0), 2), total_R=round(r.sum(), 2))
+    return dict(trades=len(r), win_rate=round(float(100 * (r > 0).mean()), 1), avg_R=round(float(r.mean()), 3),
+                profit_factor=round(float(gains / losses), 2) if losses > 0 else float("inf"),
+                max_dd_R=round(float(max(dd, 0)), 2), total_R=round(float(r.sum()), 2))
 
 
 def split(trades, cut):

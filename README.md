@@ -52,3 +52,9 @@ streamlit run app.py
 ```
 
 ⚠️ Experimental. The current backtest shows **no statistical edge**. Not financial advice.
+
+### Parameter research (`core/research.py`)
+`python -m core.research --symbol GC=F --interval 1h --cross SI=F`  (intervals: 5m/15m ≈60 days, 1h ≈730 days).
+Grid search on the first 70% only (3 time folds, median avg R), one final run on the untouched last 30%,
+compared with buy & hold and 500 random-entry runs with the same ATR exits and costs (0.01% round trip).
+Result (Oct 2026): no statistically convincing edge; best case GC=F 1h OOS +0.13R/trade, 88th percentile vs random.

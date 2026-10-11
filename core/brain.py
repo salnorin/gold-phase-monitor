@@ -16,7 +16,7 @@ import pandas as pd
 from core.bloodstream import Bloodstream
 from core.config import OrganismConfig, DEFAULT_CONFIG
 
-ORGANS = ("respiration", "optical", "motor")
+ORGANS = ("respiration", "optical", "motor", "cross")
 
 
 @dataclass
@@ -29,13 +29,14 @@ class Trade:
     stop: float
     risk: float
     votes: dict
+    cost: float = 0.0       # هزینه‌ی رفت‌وبرگشت (اسپرد/کارمزد) به دلار
     exit_time: object = None
     exit: float = None
     reason: str = ""
 
     @property
     def r_multiple(self) -> float:
-        return (self.exit - self.entry) * self.direction / self.risk if self.risk else 0.0
+        return ((self.exit - self.entry) * self.direction - self.cost) / self.risk if self.risk else 0.0
 
 
 def check_exit(trade: Trade, o, h, l, c, bars_held: int, max_hold: int):
@@ -69,6 +70,8 @@ class Brain:
             "respiration": resp,
             "optical": float(np.clip(row.get("Optical_Pull", 0.0), -1, 1)),
             "motor": float(np.clip(row.get("Motor_Drive", 0.0), -1, 1)),
+            # سیگنال متقاطع (مثلاً نقره SI=F): فقط اگر ستون Cross_Drive وجود داشته باشد
+            "cross": float(np.clip(row.get("Cross_Drive", 0.0), -1, 1)),
         }
 
     # ---------- هموستاز ----------
@@ -88,7 +91,7 @@ class Brain:
         b, c = self.blood, self.cfg
         r = trade.r_multiple
         for organ, v in trade.votes.items():
-            if abs(v) < 1e-9:
+            if abs(v) < 1e-9 or c.initial_weights.get(organ, 0) == 0:
                 continue
             agreed = np.sign(v) == trade.direction
             credit = r if agreed else -r     # مخالفت درست هم پاداش می‌گیرد
@@ -108,7 +111,7 @@ class Brain:
     def decide(self, row) -> int:
         b, c = self.blood, self.cfg
         b.votes = self.organ_votes(row)
-        total_w = sum(b.weights.values())
+        total_w = sum(b.weights.values()) or 1.0
         b.score = sum(b.weights[k] * b.votes[k] for k in ORGANS) / total_w
         b.confidence = abs(b.score) * (b.effective_atp / 100) * (1 - b.effective_cortisol / 100) * (1 - b.fatigue)
         direction = 0
@@ -116,7 +119,7 @@ class Brain:
             b.reason = f"خواب/ریکاوری پس از ضررهای پیاپی ({b.sleeping_bars} کندل مانده)"
         elif b.atp < c.atp_floor or b.cortisol > c.cortisol_ceiling:
             b.reason = "انرژی کم یا استرس بالا"
-        elif b.votes["respiration"] == 0:
+        elif c.require_respiration and b.votes["respiration"] == 0:
             b.reason = "ارگان تنفس منطقه‌ی فعالی نمی‌بیند"
         elif abs(b.score) < c.min_score:
             b.reason = "توافق ارگان‌ها کافی نیست"
@@ -138,14 +141,15 @@ class Brain:
         open_trade: Optional[Trade] = None
         pending = None
         held = 0
+        rows = df.to_dict("records")
         for i in range(n):
-            row = df.iloc[i]
+            row = rows[i]
             if pending is not None:
                 d, sig_t, votes = pending
                 entry = o[i]; risk = atr[i - 1] * c.stop_atr_mult
                 open_trade = Trade(d, sig_t, df.index[i], entry,
                                    entry + d * atr[i - 1] * c.target_atr_mult,
-                                   entry - d * risk, risk, votes)
+                                   entry - d * risk, risk, votes, c.cost_frac * entry)
                 pending, held = None, 0
             if open_trade is not None:
                 held += 1

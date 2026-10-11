@@ -17,6 +17,8 @@ class OrganismConfig:
     max_hold_bars: int = 24        # حداکثر نگهداری پوزیشن (کندل)
 
     # --- تصمیم‌گیری مغز ---
+    require_respiration: bool = True  # فقط وقتی تنفس منطقه‌ی فعال دارد
+    cost_frac: float = 0.0001         # هزینه‌ی رفت‌وبرگشت ≈ ۰٫۰۱٪ قیمت (~۰٫۴ دلار در طلا)
     min_score: float = 0.35        # حداقل قدرت رأی وزن‌دار ارگان‌ها
     min_confidence: float = 0.20   # حداقل اطمینان پس از هموستاز
     atp_floor: float = 30.0        # زیر این ATP سیگنال نمی‌دهد
@@ -32,7 +34,7 @@ class OrganismConfig:
     weight_min: float = 0.2
     weight_max: float = 2.0
     initial_weights: dict = field(default_factory=lambda: {
-        "respiration": 1.0, "optical": 0.6, "motor": 0.8,
+        "respiration": 1.0, "optical": 0.6, "motor": 0.8, "cross": 0.0,
     })
 
     # --- خستگی / خواب ---
