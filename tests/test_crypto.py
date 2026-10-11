@@ -6,23 +6,27 @@ import pytest
 
 from core import crypto as C
 from core.mind import Mind
+from core.fx import FxQuote, paper_capital
+
+CAP = paper_capital(FxQuote(1.25, pd.Timestamp('2026-10-10', tz='UTC'), 'mock'))   # 540.16 € → 675.20 $
 from tests.conftest import make_ohlcv
 
 
 def test_24_7_always_open_and_limits():
     raw = make_ohlcv(1200, seed=4)
-    m, j = C.run_crypto_mind(raw)
+    m, j = C.run_crypto_mind(raw, cfg=C.crypto_config(CAP))
     feat = C.BiologicalOrganism().build_features(raw, market="24/7")
     assert feat["Market_Open"].all()
-    assert C.CRYPTO_CONFIG.start_equity == 10 and C.CRYPTO_CONFIG.max_risk == 0.01 and C.CRYPTO_CONFIG.kill_equity == 7
+    cfg = C.crypto_config(CAP)
+    assert cfg.start_equity == 675.2 and cfg.max_risk == 0.01 and cfg.kill_equity == 472.64
     for p in m.trades:
-        assert p.qty * abs(p.entry - p.stop) <= 0.01 * 10 + 1e-9 and p.notional <= 10.0 + 1e-6
+        assert p.qty * abs(p.entry - p.stop) <= 6.752 + 1e-9 and p.notional <= 675.2 + 1e-6
 
 
 def test_kill_switch_at_7():
     from dataclasses import replace
-    m = Mind(replace(C.CRYPTO_CONFIG))
-    m.equity = 6.9
+    m = Mind(C.crypto_config(CAP))
+    m.equity = 472.0
     j = m.run(C.BiologicalOrganism().build_features(make_ohlcv(800, seed=2), market="24/7"))
     assert (j["action"] == "WAIT").all() and not m.trades and "توقف خودکار" in j["reason"].iloc[-1]
 

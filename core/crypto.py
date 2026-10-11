@@ -3,7 +3,7 @@
 بخش کریپتو — فقط کاغذی. هیچ کد سفارش یا انتقال وجود ندارد.
   - داده: کندل‌های عمومی Coinbase Exchange (بدون کلید)
   - بازار ۲۴/۷: Market_Open همیشه True
-  - قوانین: سقف مجازی ۱۰ دلار، حداکثر ریسک ۱٪ در هر معامله، توقف خودکار در ۷ دلار
+  - قوانین (core/config.py): سقف مجازی ۵۴۰٫۱۶ یورو → دلار با نرخ زنده، حداکثر ریسک ۱٪، توقف خودکار در ۷۰٪
   - نمای پرتفوی فقط‌خواندنی با کلید CDP (فقط متدهای لیست/مشاهده)
 """
 import json
@@ -22,8 +22,19 @@ PUBLIC_URL = "https://api.exchange.coinbase.com/products/{p}/candles"
 GRAN = {"1h": 3600, "15m": 900, "5m": 300}
 SECRET_PATH = os.path.expanduser("~/.secrets/coinbase_cdp.json")
 
-CRYPTO_CONFIG = MindConfig(start_equity=10.0, base_risk=0.01, min_risk=0.0025, max_risk=0.01,
-                           capital_cap=10.0, kill_equity=7.0, market="24/7", leverage=1.0)
+from core.config import MAX_RISK_PER_TRADE
+
+
+def crypto_config(cap=None) -> MindConfig:
+    """سقف یورویی کاربر به دلار (نرخ زنده)، ریسک ۱٪، توقف در ۷۰٪، بازار ۲۴/۷، بدون اهرم."""
+    from core.mind import capital_mind_config
+    return capital_mind_config(cap, base_risk=MAX_RISK_PER_TRADE, min_risk=0.0025, market="24/7", leverage=1.0)
+
+
+def crypto_sim(cap=None) -> dict:
+    from core.fx import paper_capital
+    cap = cap or paper_capital()
+    return dict(start_equity=cap.usd, risk_cap=MAX_RISK_PER_TRADE, kill_equity=cap.stop_usd)
 
 
 def fetch_candles(product="BTC-USD", interval="1h", bars=2000, session=None, now=None):
@@ -52,8 +63,6 @@ def fetch_candles(product="BTC-USD", interval="1h", bars=2000, session=None, now
     return df[df.index + pd.Timedelta(seconds=g) <= cutoff].tail(bars)
 
 
-CRYPTO_SIM = dict(start_equity=10.0, risk_cap=0.01, kill_equity=7.0)
-
 
 def crypto_features(raw, product="BTC-USD", defi_sig=None, whale_feeds=None):
     """ارگان‌ها + نهنگ (پراکسی/Arkham) + اکسیژن DeFi (اگر داده باشد)."""
@@ -68,7 +77,7 @@ def crypto_features(raw, product="BTC-USD", defi_sig=None, whale_feeds=None):
     return feat
 
 
-def run_crypto_arena(feat, interval="1h", pop=2000, generations=6, tiers=(1.0, 10.0, 20.0), seed=0):
+def run_crypto_arena(feat, interval="1h", pop=2000, generations=6, tiers=(1.0, 10.0, 20.0), seed=0, cap=None):
     """همان میدان تکامل برای هر دارایی، با سقف ۱۰ دلار، ریسک ۱٪ و حذف در ۷ دلار."""
     from core import arena as A
     from core.paper import CostModel
@@ -76,18 +85,19 @@ def run_crypto_arena(feat, interval="1h", pop=2000, generations=6, tiers=(1.0, 1
     is_end = int(len(df) * 0.7); oos = min(len(df) - 2, is_end + 48)
     hours = GRAN[interval] / 3600
     out = {}
+    sim = crypto_sim(cap)
     for lev in tiers:
         cm = CostModel(leverage=lev, bar_hours=hours)
-        G, final, hist = A.evolve(F, df, is_end, cm, pop=pop, generations=generations, seed=seed, warmup=50, sim_kw=CRYPTO_SIM)
-        d, champs = A.deflation_test(G, final, F, df, oos, len(df), cm, sim_kw=CRYPTO_SIM)
+        G, final, hist = A.evolve(F, df, is_end, cm, pop=pop, generations=generations, seed=seed, warmup=50, sim_kw=sim)
+        d, champs = A.deflation_test(G, final, F, df, oos, len(df), cm, sim_kw=sim)
         out[lev] = dict(history=hist, deflation=d)
     return out, df.index[oos]
 
 
-def run_crypto_mind(raw, interval="1h", cfg: MindConfig = CRYPTO_CONFIG, feat=None):
+def run_crypto_mind(raw, interval="1h", cfg: MindConfig = None, feat=None):
     hours = GRAN[interval] / 3600
     feat = feat if feat is not None else BiologicalOrganism().build_features(raw, market="24/7")
-    m = Mind(replace(cfg, bar_hours=hours))
+    m = Mind(replace(cfg or crypto_config(), bar_hours=hours))
     j = m.run(feat)
     return m, j
 

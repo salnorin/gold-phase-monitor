@@ -2,6 +2,11 @@
 """تمام آستانه‌ها و پارامترهای ارگانیسم در یک جا (قابل تنظیم)."""
 from dataclasses import dataclass, field
 
+# ---- سرمایه‌ی مجازی (فقط کاغذی) — برای تغییر، فقط همین سه عدد را عوض کنید ----
+PAPER_CAPITAL_EUR = 540.16        # سقف پایه به یورو؛ دلار با نرخ زنده‌ی EUR/USD محاسبه می‌شود (core/fx.py)
+MAX_RISK_PER_TRADE = 0.01         # حداکثر ریسک هر معامله = ۱٪ سقف
+AUTO_STOP_FRACTION = 0.70         # توقف خودکار در ۷۰٪ سقف
+
 
 @dataclass
 class OrganismConfig:

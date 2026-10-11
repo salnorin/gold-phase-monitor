@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -49,15 +50,15 @@ def test_blackbox_blocks_similar_context_and_releases():
 def test_risk_scaling():
     m = Mind()
     base = m.risk_fraction()
-    assert abs(base - 0.01) < 1e-12
+    assert abs(base - 0.0075) < 1e-12 and m.cfg.max_risk == 0.01
     m.equity = m.peak * 0.95                       # آب‌میوه افت کرد → ریسک کمتر
     assert m.risk_fraction() < base
     m.equity = m.peak * 0.85
     assert m.risk_fraction() == m.cfg.min_risk * 1.0 or m.risk_fraction() <= 0.0025 + 1e-12
     m.equity = m.peak
-    assert m.risk_fraction(wins_streak=3) == 0.0105   # رشد آهسته
-    assert m.risk_fraction(wins_streak=100) <= m.cfg.max_risk
-    assert m.risk_fraction(recovery=3) == 0.005        # پس از افت ۱۰٪
+    assert abs(m.risk_fraction(wins_streak=3) - 0.007875) < 1e-12   # رشد آهسته
+    assert m.risk_fraction(wins_streak=100) == m.cfg.max_risk == 0.01
+    assert abs(m.risk_fraction(recovery=3) - 0.00375) < 1e-12        # پس از افت ۱۰٪
 
 
 def test_doubt_trust_update():
@@ -123,3 +124,48 @@ def test_forming_candle_holiday_and_reopen():
     fri = pd.DatetimeIndex([pd.Timestamp("2026-10-09 14:00", tz="America/Chicago")])
     m = open_mask(fri.append(reopen), 1.0)
     assert list(m) == [True, False, True, True]
+
+
+def test_capital_from_mocked_rate(tmp_path, monkeypatch):
+    import core.fx as fx
+    from core.config import PAPER_CAPITAL_EUR
+    from core.mind import capital_mind_config
+    monkeypatch.setattr(fx, "CACHE_DIR", str(tmp_path))
+    q = fx.FxQuote(1.10, pd.Timestamp("2026-10-10", tz="UTC"), "mock")
+    good = lambda: q
+    assert fx.eur_usd(use_cache=False, providers=[good]).rate == 1.10
+    cap = fx.paper_capital(fx.eur_usd(use_cache=False, providers=[good]))
+    assert PAPER_CAPITAL_EUR == 540.16 and cap.usd == 594.18 and cap.risk_usd == 5.94 and cap.stop_usd == 415.93
+    c = capital_mind_config(cap)
+    assert c.start_equity == c.capital_cap == 594.18 and c.kill_equity == 415.93 and c.max_risk == 0.01
+    # هر دو منبع شکست → آخرین نرخ معتبر با هشدار
+    def bad(): raise ConnectionError("down")
+    lk = fx.eur_usd(use_cache=False, providers=[bad, bad])
+    assert lk.rate == 1.10 and lk.warning and "last known good" in lk.source
+    # کش ۱۰ دقیقه‌ای: بدون فراخوانی منبع
+    assert fx.eur_usd(use_cache=True, providers=[bad]).rate == 1.10
+    # هیچ نرخی هرگز → خطا (نرخ ثابت در کد نیست)
+    monkeypatch.setattr(fx, "CACHE_DIR", str(tmp_path / "empty"))
+    with pytest.raises(RuntimeError):
+        fx.eur_usd(use_cache=False, providers=[bad])
+    with pytest.raises(RuntimeError):     # نرخ غیرمنطقی رد می‌شود
+        fx.eur_usd(use_cache=False, providers=[lambda: fx.FxQuote(9.0, q.timestamp, "x")])
+
+
+def test_status_detail_states():
+    from core.market_hours import status_detail
+    B = lambda s: pd.Timestamp(s, tz="Europe/Berlin")
+    fri_last = B("2026-10-09 22:00")                       # آخرین کندل جمعه
+    assert status_detail(fri_last, B("2026-10-10 12:00"), 1.0)[0] == "closed"
+    assert status_detail(fri_last, B("2026-10-12 00:20"), 1.0)[0] == "awaiting"   # پس از بازگشایی یکشنبه
+    assert status_detail(B("2026-10-07 10:00"), B("2026-10-07 15:00"), 1.0)[0] == "stale"
+    assert status_detail(B("2026-10-07 13:00"), B("2026-10-07 14:30"), 1.0)[0] == "open"
+
+
+def test_awake_with_fresh_minute_bar_and_feed_delay():
+    from core.market_hours import status_detail
+    now = pd.Timestamp("2026-10-12 00:25", tz="Europe/Berlin")            # دوشنبه بامداد، بازار باز
+    assert status_detail(now - pd.Timedelta(minutes=2), now, 1 / 60)[0] == "open"
+    assert status_detail(now - pd.Timedelta(minutes=11), now, 1 / 60, feed_delay_min=15)[0] == "open"
+    assert status_detail(now - pd.Timedelta(minutes=11), now, 1 / 60)[0] != "open"
+    assert status_detail(pd.Timestamp("2026-10-11 22:15", tz="UTC"), pd.Timestamp("2026-10-11 22:25", tz="UTC"), 1 / 60, 15)[0] == "open"
