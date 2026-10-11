@@ -122,7 +122,7 @@ def monte_carlo(raw, tier_champs, hours, n_paths=30):
 
 def main(csv_dir=None, pop=10_000, interval="1h", n_paths=30):
     hours = {"1h": 1.0, "15m": 0.25, "5m": 5 / 60}[interval]
-    raw = load("GC=F", interval, csv_dir); cross = load("SI=F", interval, csv_dir)
+    raw = load("PAXG-USD", interval, csv_dir); cross = load("SI=F", interval, csv_dir)
     feat = add_cross(BiologicalOrganism().build_features(raw), cross)
     df, F = A.feature_matrix(feat)
     is_end = int(len(df) * 0.7); oos_start = is_end + 96

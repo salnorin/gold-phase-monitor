@@ -263,7 +263,7 @@ def run_arena(raw, cross_raw=None, interval_hours=1.0, pop=10_000, generations=8
 if __name__ == "__main__":
     from core.research import load
     ap = argparse.ArgumentParser()
-    ap.add_argument("--symbol", default="GC=F"); ap.add_argument("--interval", default="1h")
+    ap.add_argument("--symbol", default="PAXG-USD"); ap.add_argument("--interval", default="1h")
     ap.add_argument("--cross"); ap.add_argument("--csv-dir"); ap.add_argument("--pop", type=int, default=10_000)
     ap.add_argument("--generations", type=int, default=8)
     a = ap.parse_args()

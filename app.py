@@ -16,18 +16,75 @@ from core.market_hours import FEED_DELAY_MIN, status_detail
 from core.organism import BiologicalOrganism
 from core.research import load
 
-st.set_page_config(page_title="ارگانیسم طلا — موجود زنده", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("<style>section.main .stMarkdown, [data-testid='stMainBlockContainer'] .stMarkdown {direction: rtl; text-align: right;}</style>", unsafe_allow_html=True)
-st.title("🐻 ارگانیسم زنده‌ی طلا (XAU/USD)")
-st.caption("⚠️ فقط شبیه‌سازی کاغذی و آموزشی — بدون سفارش واقعی و بدون کلید صرافی. توصیه‌ی مالی نیست.")
+from core.i18n import CREDIT, LANGS, RTL, norm, regime, t as _t
+
+# ---------- زبان: ?lang= ← session_state؛ پیش‌فرض فارسی ----------
+if "lang" not in st.session_state:
+    st.session_state.lang = norm(st.query_params.get("lang"))
+L = st.session_state.lang
+
+
+def T(key, **kw):
+    return _t(key, L, **kw)
+
+
+def _set_lang(src):
+    v = st.session_state.get(src)
+    if v:
+        st.session_state.lang = v
+        st.session_state.lang_top = st.session_state.lang_side = v
+        st.query_params["lang"] = v
+
+
+st.session_state.setdefault("lang_top", L)
+st.session_state.setdefault("lang_side", L)
+
+st.set_page_config(page_title=T("page_title"), page_icon="🐻", layout="wide", initial_sidebar_state="collapsed")
+RTL_ON = L in RTL
+DIR = "rtl" if RTL_ON else "ltr"
+COL = {"LONG": "#22c55e", "SHORT": "#ef4444", "WAIT": "#94a3b8"}     # رنگ‌های ثابت جهت
+GOLD = "#e8b931"
+st.markdown(f"""<style>
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap');
+html, body, [class*="css"], .stMarkdown, .stMetric, button, input {{ font-family: {"'Vazirmatn', " if RTL_ON else ""}'Inter', system-ui, sans-serif; }}
+[data-testid='stMainBlockContainer'] {{ padding-top: 3rem; max-width: 1300px; }}
+[data-testid='stMainBlockContainer'] .stMarkdown, [data-testid='stMainBlockContainer'] .stCaption {{ direction: {DIR}; text-align: {"right" if RTL_ON else "left"}; }}
+[data-testid='stMetric'] {{ background: rgba(255,255,255,.035); border: 1px solid rgba(232,185,49,.18); border-radius: 14px; padding: 12px 14px; }}
+[data-testid='stMetricLabel'] {{ opacity: .8; }}
+.stTabs [data-baseweb='tab-list'] {{ gap: 6px; }}
+.stTabs [data-baseweb='tab'] {{ background: rgba(255,255,255,.04); border-radius: 10px 10px 0 0; padding: 8px 14px; }}
+.stTabs [aria-selected='true'] {{ color: {GOLD} !important; }}
+.hero {{ direction:{DIR}; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }}
+.hero h1 {{ margin:0; font-size:1.9rem; font-weight:800; color:{GOLD}; }}
+.card {{ direction:{DIR}; border-radius:16px; padding:14px 16px; margin-bottom:12px; }}
+@media (max-width: 640px) {{
+  [data-testid='stMainBlockContainer'] {{ padding: .6rem .7rem; }}
+  .hero h1 {{ font-size: 1.25rem; }}
+  .card {{ padding: 10px 12px; border-radius: 12px; font-size: .92em; }}
+  [data-testid='stMetric'] {{ padding: 8px 10px; }}
+  [data-testid='stMetricValue'] {{ font-size: 1.3rem; }}
+  svg {{ max-width: 170px; height: auto; }}
+  .stTabs [data-baseweb='tab'] {{ padding: 6px 8px; font-size: .85em; }}
+  .hide-mobile {{ display: none; }}
+}}
+.credit {{ text-align:center; direction:{DIR}; opacity:.7; margin-top:24px; font-size:.9em; }}
+</style>""", unsafe_allow_html=True)
+
+top_l, top_r = st.columns([3, 2])
+with top_l:
+    st.markdown(f"<div class='hero'><h1>{T('title')}</h1></div>", unsafe_allow_html=True)
+with top_r:
+    st.segmented_control(T("language"), list(LANGS), format_func=LANGS.get, key="lang_top",
+                         on_change=_set_lang, args=("lang_top",), label_visibility="collapsed")
+st.caption(f"{T('disclaimer')} · {CREDIT[L]}")
+st.sidebar.radio(T("language"), list(LANGS), format_func=LANGS.get, key="lang_side", on_change=_set_lang, args=("lang_side",))
 
 BERLIN = "Europe/Berlin"
-CREDIT_FA = "این ارگانیسم توسط سالار خانبابا و با همفکری گروک بات خلق شده است"
+CREDIT_FA = CREDIT["fa"]
 
 
 def credit_footer():
-    st.markdown(f"<div style='text-align:center;direction:rtl;opacity:.75;margin-top:24px;font-size:.95em'>{CREDIT_FA}</div>",
-                unsafe_allow_html=True)
+    st.markdown(f"<div class='credit'>{CREDIT[L]}</div>", unsafe_allow_html=True)
 
 
 def to_berlin(df):
@@ -56,15 +113,17 @@ def latest_fast_candle():
 
 
 INTERVAL_H = {"1h": 1.0, "15m": 0.25, "5m": 5 / 60}
-interval = st.sidebar.selectbox("بازه‌ی کندل", list(INTERVAL_H), index=0)
-leverage = st.sidebar.select_slider("اهرم شبیه‌سازی", options=[1, 5, 10, 20], value=20)
-pop = st.sidebar.select_slider("جمعیت میدان تکامل", options=[500, 2000, 10000], value=2000)
-live = st.sidebar.checkbox("🔴 به‌روزرسانی خودکار (پنل زنده هر ۱۵ ثانیه، بقیه هر ۵ دقیقه)", value=True)
+interval = st.sidebar.selectbox(T("interval"), list(INTERVAL_H), index=0)
+leverage = st.sidebar.select_slider(T("leverage"), options=[1, 5, 10, 20], value=20)
+pop = st.sidebar.select_slider(T("population"), options=[500, 2000, 10000], value=2000)
+manual = st.sidebar.toggle(T("manual_preset"), value=False, help=T("manual_help"))
+live = st.sidebar.checkbox(T("auto"), value=True)
 
 
-@st.cache_data(ttl=240, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_data(interval):
-    raw = load("GC=F", interval)
+    from core import gold_price
+    raw = gold_price.candles(interval, 3000)        # PAXG-USD: قیمت یگانه‌ی طلا
     try:
         cross = load("SI=F", interval)
     except Exception:
@@ -98,9 +157,9 @@ def run_arena_cached(raw, cross, interval, pop):
 MOUTH = {"happy": "M96 106 Q110 122 124 106", "sad": "M98 116 Q110 104 122 116", "neutral": "M100 108 Q110 116 120 108"}
 
 
-WARNING_3L = ("⚠️ سیگنال کاغذی و اثبات‌نشده است؛ توصیه‌ی مالی نیست؛ اهرم می‌تواند کل حساب را از بین ببرد. · "
-              "Unproven paper signal, not financial advice; leverage can wipe out the account. · "
-              "Unbewiesenes Papiersignal, keine Finanzberatung; Hebel kann das gesamte Konto vernichten.")
+def warning_box():
+    st.markdown(f"<div class='card' dir='{DIR}' style='direction:{DIR};text-align:{"right" if RTL_ON else "left"};"
+                f"border:1px solid #f59e0b66;background:#f59e0b14;font-size:.9em'>{T('warning3')}</div>", unsafe_allow_html=True)
 
 
 def creature_svg(breath_s, hue, label, mood="neutral", bias=0, asleep=False):
@@ -129,9 +188,8 @@ def creature_svg(breath_s, hue, label, mood="neutral", bias=0, asleep=False):
   <g class="eye"><circle cx="90" cy="72" r="6" fill="#111"/><circle cx="130" cy="72" r="6" fill="#111"/></g>
   <ellipse cx="110" cy="150" rx="40" ry="30" fill="hsl({hue},40%,62%)"/>
  </g>
- <text x="196" y="40" font-size="34" fill="{'#00cc66' if bias > 0 else '#ff3366' if bias < 0 else '#aaa'}">{'↗' if bias > 0 else '↙' if bias < 0 else '→'}</text>
- <text x="110" y="196" text-anchor="middle" font-size="13" fill="#ddd">{label}</text>
-</svg></div>"""
+ <text x="196" y="40" font-size="34" fill="{COL['LONG'] if bias > 0 else COL['SHORT'] if bias < 0 else COL['WAIT']}">{'↗' if bias > 0 else '↙' if bias < 0 else '→'}</text>
+ </svg></div>"""
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -157,29 +215,28 @@ def portfolio_view():
 
 def crypto_tab():
     cap = capital()
-    st.caption(f"فقط کاغذی: سقف مجازی {cap.eur:,.2f} € ≈ {cap.usd:,.2f} $، حداکثر ریسک هر معامله {cap.risk_usd:,.2f} $ (۱٪)، "
-               f"توقف خودکار در {cap.stop_usd:,.2f} $ (۷۰٪). بازار ۲۴/۷. هیچ سفارش واقعی.")
-    product = st.radio("دارایی", ["BTC-USD", "ETH-USD"], horizontal=True)
+    st.caption(T("crypto_cap", eur=cap.eur, usd=cap.usd, risk=cap.risk_usd, stop=cap.stop_usd))
+    product = st.radio(T("asset"), ["BTC-USD", "ETH-USD"], horizontal=True)
     try:
         j, trades, bb, feeds, has_defi, expl = crypto_data(product)
     except Exception as e:
-        st.error(f"داده‌ی کریپتو در دسترس نیست: {e}"); return
+        st.error(T("crypto_fail", e=e)); return
     last = j.iloc[-1]
     a, b, c, d = st.columns(4)
-    a.metric("🧃 آب‌میوه مجازی", f"${last.juice:,.2f}", f"{last.juice / cap.usd - 1:+.1%}")
-    b.metric("قیمت", f"{last.close:,.2f}")
-    c.metric("🫁 اکسیژن (با DeFi)" if has_defi else "🫁 اکسیژن", f"{last.oxygen:.2f}")
-    d.metric("اقدام", last.action)
+    a.metric(T("vjuice"), f"${last.juice:,.2f}", f"{last.juice / cap.usd - 1:+.1%}")
+    b.metric(T("price"), f"{last.close:,.2f}")
+    c.metric(T("oxygen") + (" (DeFi)" if has_defi else ""), f"{last.oxygen:.2f}")
+    d.metric(T("action"), last.action)
     st.markdown(expl)
-    st.caption(f"خوراک نهنگ: {', '.join(feeds)} | DefiLlama: {'فعال' if has_defi else 'در دسترس نیست'}")
-    st.subheader("📜 تاریخچه‌ی معاملات کاغذی (وقت برلین)")
-    st.dataframe(to_berlin(trades.tail(20).iloc[::-1]) if not trades.empty else pd.DataFrame({"پیام": ["هنوز معامله‌ای نیست"]}), width="stretch")
-    st.subheader("پرتفوی واقعی (فقط‌خواندنی)")
+    st.caption(T("feeds", f=", ".join(feeds), d=T("active") if has_defi else T("unavailable")))
+    st.subheader(T("trades_h"))
+    st.dataframe(to_berlin(trades.tail(20).iloc[::-1]) if not trades.empty else pd.DataFrame({T("msg"): [T("no_trades_yet")]}), width="stretch")
+    st.subheader(T("portfolio"))
     try:
         bal, tot = portfolio_view()
         st.dataframe(bal, width="stretch"); st.dataframe(tot, width="stretch")
     except Exception as e:
-        st.info(f"کلید فقط‌خواندنی پیدا نشد یا اتصال ناموفق بود ({type(e).__name__}).")
+        st.info(T("no_key", e=type(e).__name__))
 
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -210,48 +267,126 @@ def crypto_ticker(product):
 
 @st.cache_data(ttl=8, show_spinner=False)
 def paxg_price():
-    """PAXG-USD (توکن طلا روی Coinbase، ۲۴/۷) — قیمت سریع و جایگزین؛ آتی طلا نیست و باز بودن بازار طلا را تعیین نمی‌کند."""
-    return crypto_ticker("PAXG-USD")
+    """PAXG-USD — قیمت یگانه‌ی طلا (core.gold_price). باز بودن بازار را GC=F/ساعات CME تعیین می‌کند، نه PAXG."""
+    from core import gold_price
+    return gold_price.ticker()
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def gold_minutes_all():
+    from core import gold_price
+    try:
+        return gold_price.candles("1m", 120)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def organism_decision_cached(raw, cross, interval, leverage, manual, wake_bar, minutes, _now_key):
+    """تصمیم یگانه — یک بار در هر تازه‌سازی (کش ۱۵ ثانیه)."""
+    from core.config import MANUAL_TEST_RR
+    from core.decision import organism_decision
+    cfg = capital_mind_config(capital(), leverage=float(leverage), bar_hours=INTERVAL_H[interval])
+    dec, ctx = organism_decision(raw, cfg, pd.Timestamp.now(tz="UTC"), cross=cross, wake_bar=wake_bar,
+                                 wake_interval_h=1 / 60 if wake_bar is not None else None,
+                                 feed_delay_min=FEED_DELAY_MIN if wake_bar is not None else 0.0,
+                                 minutes=minutes, rr=MANUAL_TEST_RR if manual else None)
+    return dec, ctx["feat"], ctx["journal"]
+
+
+def preview_svg(lean, conf, color, pulse_s):
+    """عقربه‌ی طلایی: −۱ = SHORT (چپ)، +۱ = LONG (راست)؛ نبض با نزدیک شدن بسته شدن کندل تندتر می‌شود."""
+    ang = float(np.clip(lean, -1, 1)) * 80
+    return f"""<div style="display:flex;justify-content:center"><svg viewBox="0 0 240 150" width="300" height="188">
+<style>.pulse{{transform-origin:120px 120px;animation:pl {pulse_s:.2f}s ease-in-out infinite}}
+@keyframes pl{{0%,100%{{opacity:.35;transform:scale(1)}}50%{{opacity:.9;transform:scale(1.08)}}}}
+.orb{{transform-origin:120px 120px;animation:orb 6s linear infinite}}@keyframes orb{{to{{transform:rotate(360deg)}}}}
+.needle{{transform-origin:120px 120px;transform:rotate({ang:.1f}deg);transition:transform 1.2s}}</style>
+<path d="M20 120 A100 100 0 0 1 220 120" stroke="#2a2f3a" stroke-width="16" fill="none"/>
+<path d="M20 120 A100 100 0 0 1 95 25" stroke="{COL['SHORT']}" stroke-width="16" fill="none" opacity=".55"/>
+<path d="M95 25 A100 100 0 0 1 145 25" stroke="{COL['WAIT']}" stroke-width="16" fill="none" opacity=".45"/>
+<path d="M145 25 A100 100 0 0 1 220 120" stroke="{COL['LONG']}" stroke-width="16" fill="none" opacity=".55"/>
+<circle class="pulse" cx="120" cy="120" r="30" fill="{color}" opacity=".4"/>
+<g class="orb"><circle cx="120" cy="52" r="4" fill="{GOLD}"/></g>
+<g class="needle"><line x1="120" y1="120" x2="120" y2="32" stroke="{GOLD}" stroke-width="5" stroke-linecap="round"/></g>
+<circle cx="120" cy="120" r="10" fill="{GOLD}"/>
+<text x="120" y="146" text-anchor="middle" font-size="15" fill="{color}" font-weight="700">{conf:.0%}</text>
+<text x="18" y="146" font-size="12" fill="{COL['SHORT']}">SHORT</text><text x="222" y="146" text-anchor="end" font-size="12" fill="{COL['LONG']}">LONG</text>
+</svg></div>"""
+
+
+def gate_bar(label, value, thr, color):
+    pct = float(np.clip(value / thr if thr else 0, 0, 1.2))
+    return (f"<div style='margin:4px 0'><div style='display:flex;justify-content:space-between;font-size:.88em'>"
+            f"<span>{label}</span><span>{value:.0%} / {thr:.0%}</span></div>"
+            f"<div style='background:#2a2f3a;border-radius:6px;height:8px'><div style='width:{min(pct, 1) * 100:.0f}%;"
+            f"height:8px;border-radius:6px;background:{color}'></div></div></div>")
+
+
+RASOUL_TITLE = "با کمک رسول واحد"   # PLACEHOLDER — منتظر املای نهایی مالک؛ فقط همین ثابت را عوض کنید
+
+
+def advice_box(dec):
+    """«با کمک رسول واحد»: هیچ محاسبه‌ی جداگانه — فقط شیء Decision."""
+    from core.decision import advice_key
+    key = advice_key(dec)
+    col = {"adv_long": COL["LONG"], "adv_short": COL["SHORT"]}.get(key, "#f59e0b")
+    title = RASOUL_TITLE + ("" if L == "fa" else f" · {T('adv_title_tr')}")
+    st.markdown(f"<div class='card' style='border:2px solid {col};background:{col}1a;text-align:center'>"
+                f"<div style='font-size:.95em;opacity:.8'>{title}</div>"
+                f"<div style='font-size:1.8em;font-weight:800;color:{col}'>{T(key)}</div>"
+                f"<div style='font-size:.75em;opacity:.65'>{T('adv_caption')}</div></div>", unsafe_allow_html=True)
+
+
+def next_decision_preview(dec, now):
+    st.markdown(f"#### {T('pv_title')}")
+    if not dec.provisional:
+        st.caption(T("pv_none")); return
+    left = max(pd.Timedelta(0), dec.bar_close - now)
+    pulse = float(np.clip(left.total_seconds() / 900, 0.5, 3.0))
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown(preview_svg(dec.lean, dec.confidence, COL.get(dec.action, COL["WAIT"]), pulse), unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<div class='card' style='border:1px dashed {GOLD}88'>"
+                    f"<div style='font-size:1.5em;font-weight:800;color:{COL.get(dec.action, COL['WAIT'])}'>{dec.action} · {T('pv_badge')}</div>"
+                    f"<div style='opacity:.85'>{T('pv_label', t=f'{dec.bar_close.tz_convert(BERLIN):%H:%M}', m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60), n=int((now - dec.timestamp).total_seconds() // 60))}</div>"
+                    + gate_bar("LONG · " + T("pv_bull"), dec.P_bull, dec.dominance_thr, COL["LONG"])
+                    + gate_bar("SHORT · " + T("pv_bear"), dec.P_bear, dec.dominance_thr, COL["SHORT"])
+                    + gate_bar(T("pv_doubt"), dec.doubt, dec.max_doubt, COL["WAIT"])
+                    + f"<div style='opacity:.75;font-size:.85em;margin-top:6px'>{dec.reason}</div></div>",
+                    unsafe_allow_html=True)
 
 
 @st.fragment(run_every=timedelta(seconds=15) if live else None)
 def live_panel():
-    """پنل زنده (هر ۱۵ ثانیه، بدون بارگذاری کل صفحه): وضعیت بازار، خرس، قیمت، حساب کاغذی زنده، آخرین سیگنال."""
+    """پنل زنده: همه‌چیز از یک شیء Decision (core.decision) — وضعیت، خرس، کارت، پیش‌نمایش، رسول واحد، حساب کاغذی."""
+    from core.decision import live_signal, signal_card, status_key
     from core.live_account import LivePaperAccount
+    now = pd.Timestamp.now(tz="UTC")
+    mins = gold_minute()                                   # GC=F: فقط مرجع آتی + نشان «تأخیر خوراک»
     try:
         raw, cross = get_data(interval)
-        feat, j, trades, bb, explain, events, strat, extra = run_mind(raw, cross, interval, leverage)
+        # باز/بسته از تقویم CME (اصلی) + تازگی کندل‌های PAXG؛ GC=F هرگز وضعیت را «بسته» نمی‌کند
+        dec, feat, j = organism_decision_cached(raw, cross, interval, leverage, manual, None, gold_minutes_all(),
+                                                now.floor("15s"))
+        trades = run_mind(raw, cross, interval, leverage)[2]
     except Exception as e:
-        st.error(f"دریافت داده ناموفق بود: {e}"); return
+        st.error(T("data_fail", e=e)); return
     cap = capital()
-    now = pd.Timestamp.now(tz="UTC")
-    mins = gold_minute()
-    fast = mins.index[-1] if mins is not None else None
-    last = j.iloc[-1]
-    last_bar = max([t for t in (j.index[-1], fast) if t is not None])
-    use_fast = fast is not None and last_bar == fast
-    state, state_reason = status_detail(last_bar, now, 1 / 60 if use_fast else INTERVAL_H[interval],
-                                        feed_delay_min=FEED_DELAY_MIN if use_fast else 0.0)
-    if state == "open" and j.index[-1] < last_bar - pd.Timedelta(minutes=int(INTERVAL_H[interval] * 60)):
-        state_reason += f" — بیدار؛ منتظر بسته شدن اولین کندل {interval} برای سیگنال"
-    awake = state == "open"
-    # حساب کاغذی زنده (از لحظه‌ی ایجاد، روی دیسک)
+    conf_dec = dec.confirmed or dec
+    awake = not dec.asleep
     cfg = capital_mind_config(cap, leverage=float(leverage), bar_hours=INTERVAL_H[interval])
-    acc = LivePaperAccount("gold", cap.usd, cfg)
-    acc.update(feat, j, awake)
+    from core.config import MANUAL_TEST_RISK_EUR, MANUAL_TEST_RR
+    acc = LivePaperAccount("gold", cap.usd, cfg, fixed_risk_usd=MANUAL_TEST_RISK_EUR * cap.rate if manual else None,
+                           rr=MANUAL_TEST_RR if manual else None)
+    acc.update(feat, j, awake, signal=live_signal(dec))
     paxg = paxg_price()
-    price_src = "GC=F ۱ دقیقه (Yahoo، ~۱۰ دقیقه تأخیر)"
-    if mins is not None:
-        price = float(mins["Close"].iloc[-1])
-    elif paxg:
-        price, price_src = paxg, "PAXG-USD (جایگزین؛ توکن طلا، نه آتی)"
-    else:
-        price = float(last.close)
-    prev = float(mins["Close"].iloc[-2]) if mins is not None and len(mins) > 1 else price
+    fut = float(mins["Close"].iloc[-1]) if mins is not None else None      # GC=F فقط مرجع
+    price = paxg if paxg else dec.price
+    prev = st.session_state.get("paxg", price) or price
     pos = acc.state["position"]
-    unreal = 0.0
-    if pos:
-        unreal = pos["qty"] * (price - pos["entry"]) * pos["direction"] - pos["fees"] - pos["funding"]
+    unreal = pos["qty"] * (price - pos["entry"]) * pos["direction"] - pos["fees"] - pos["funding"] if pos else 0.0
     lt = acc.trades_frame()
     feeling = "neutral"
     if not lt.empty:
@@ -259,83 +394,104 @@ def live_panel():
     elif not trades.empty and "pnl" in trades and trades["pnl"].notna().any():
         feeling = "happy" if trades["pnl"].dropna().iloc[-1] > 0 else "sad"
     hue = {"happy": 125, "sad": 0, "neutral": 210}[feeling]
-    breath = float(np.clip(4.0 / (max(last.vol_ratio, 0.2) * max(last.oxygen, 0.2) ** 0.5), 0.6, 6.0))
+    breath = float(np.clip(4.0 / (max(dec.vol_ratio, 0.2) * max(dec.oxygen, 0.2) ** 0.5), 0.6, 6.0))
     if feeling == "sad":
         breath = max(breath, 5.5)
     if not awake:
         breath = 7.0
-    mood = {"closed": "خواب — بازار بسته 💤", "awaiting": "در حال بیدار شدن ⏳", "stale": "منتظر داده 💤"}.get(state, "بیدار 👀")
-    mood += {"happy": " · معامله‌ی آخر: برد 😊", "sad": " · معامله‌ی آخر: باخت 🤒", "neutral": ""}[feeling]
-    badge = {"open": ("#00cc66", "🟢 بازار باز — بیدار"), "closed": ("#888888", "⚫ بازار بسته"),
-             "awaiting": ("#ffaa00", "🟡 بازار باز — منتظر اولین کندل بسته‌شده"), "stale": ("#ffaa00", "🟡 داده‌ی کهنه")}[state]
-    live_action = last.action if awake else "WAIT"
-    st.markdown(f"<div style='direction:rtl;border:3px solid {badge[0]};border-radius:16px;padding:14px;margin-bottom:12px;background:{badge[0]}22'>"
-                f"<div style='font-size:1.6em;font-weight:bold;color:{badge[0]}'>وضعیت فعلی: {badge[1]}</div>"
-                f"<div>{state_reason}</div>"
-                f"<div>آخرین کندل بسته‌شده: {pd.Timestamp(last_bar).tz_convert(BERLIN):%Y-%m-%d %H:%M} (وقت برلین) · "
-                f"اکنون: {now.tz_convert(BERLIN):%H:%M:%S} · داده‌ی طلای Yahoo حدود ۱۰ دقیقه تأخیر دارد</div>"
-                f"<div>اقدام فعلی: <b>{live_action}</b> — {last.reason if awake else 'بدون سیگنال تا رسیدن کندل تازه'}</div></div>",
+    mood = {"open": "👀", "closed": "💤", "awaiting": "⏳", "stale": "💤"}[dec.market_state]
+    mood += {"happy": " · " + T("mood_happy"), "sad": " · " + T("mood_sad"), "neutral": ""}[feeling]
+    colr = {"open": "#22c55e", "closed": "#64748b", "awaiting": "#f59e0b", "stale": "#f59e0b"}[dec.market_state]
+    icon = {"open": "🟢", "closed": "⚫", "awaiting": "🟡", "stale": "🟡"}[dec.market_state]
+    if awake and dec.provisional:
+        left = max(pd.Timedelta(0), dec.bar_close - now)
+        reason_txt = T("awake_wait", iv=interval, t=f"{dec.bar_close.tz_convert(BERLIN):%H:%M}",
+                       m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60))
+    elif awake and any(k in conf_dec.reason for k in ("بسته", "خواب", "کهنه")):
+        reason_txt = T("awake_wait", iv=interval, t=f"{(conf_dec.bar_close + pd.Timedelta(hours=INTERVAL_H[interval])).tz_convert(BERLIN):%H:%M}",
+                       m=int(max(0, (conf_dec.bar_close + pd.Timedelta(hours=INTERVAL_H[interval]) - now).total_seconds()) // 60), s=0)
+    else:
+        reason_txt = conf_dec.reason if awake else T("no_sig_sleep")
+    shown = live_signal(dec)
+    # ===== ۱) وضعیت (یک شیء بازار) =====
+    st.markdown(f"<div class='card' style='border:2px solid {colr};background:{colr}1a'>"
+                f"<div style='font-size:1.4em;font-weight:800;color:{colr}'>{icon} {T(status_key(dec))}</div>"
+                f"<div>{T('action_now')}: <b style='color:{COL[shown]}'>{shown}</b> — {reason_txt}</div>"
+                f"<div style='opacity:.7;font-size:.85em'>{T('last_candle', t=f'{conf_dec.timestamp.tz_convert(BERLIN):%Y-%m-%d %H:%M}', now=f'{now.tz_convert(BERLIN):%H:%M:%S}')}</div></div>",
                 unsafe_allow_html=True)
+    # ===== ۲) با کمک رسول واحد =====
+    advice_box(dec)
+    # ===== ۳) کارت تصمیم (از Decision.confirmed) =====
+    card = signal_card(dec)
+    if card:
+        col = COL[card["action"]]
+        lv = T("sig_levels", e=card["entry"], s=card["stop"], t=card["target"])
+        meta = T("sig_meta", c=card["confidence"], iv=interval, t=f"{card['issued'].tz_convert(BERLIN):%Y-%m-%d %H:%M}",
+                 x=f"{card['expires'].tz_convert(BERLIN):%H:%M}")
+        st.markdown(f"<div class='card' style='border:3px solid {col};background:{col}1f'>"
+                    f"<div style='font-size:2em;font-weight:800;color:{col}'>{card['action']}</div>"
+                    f"<div>{lv}</div><div style='opacity:.85'>{meta}</div></div>", unsafe_allow_html=True)
+    # ===== ۴) قیمت (فقط PAXG) و حساب کاغذی =====
+    a, b, c = st.columns(3)
+    a.metric(T("gold_main"), f"{price:,.2f}", f"{price - prev:+.2f}")
+    b.metric(T("live_acc"), f"{acc.equity + unreal:,.2f}", f"{(acc.equity + unreal) / acc.state['start_equity'] - 1:+.2%}")
+    c.metric(T("open_pnl"), f"{unreal:+,.2f}")
+    st.session_state["paxg"] = paxg
+    # ===== ۵) خرس (SVG جدا) + متن‌ها در ستون جدا؛ روی موبایل زیر هم =====
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown(creature_svg(breath, hue, "", feeling, dec.bias, asleep=dec.asleep), unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"<div class='card' style='border:1px solid #ffffff1f'>{T('breath', s=breath)} · {mood}</div>",
+                    unsafe_allow_html=True)
+        ev = acc.state.get("last_event") or {}
+        if pos:
+            txt, col = T("ex_long" if pos["direction"] > 0 else "ex_short"), COL["LONG" if pos["direction"] > 0 else "SHORT"]
+        elif ev.get("kind") == "closed" and pd.Timestamp(ev["time"]) >= conf_dec.timestamp:
+            txt, col = T("ex_closed", r={"target": "TP", "stop": "SL", "gap_stop": "SL", "liquidation": "LIQ", "time": "⏱"}.get(ev["reason"], ev["reason"]),
+                         p=ev["pnl"]), GOLD
+        else:
+            txt, col = T("ex_next", a=T({"LONG": "a_long", "SHORT": "a_short"}.get(dec.action, "a_wait"))), COL.get(dec.action, COL["WAIT"])
+        st.markdown(f"<div class='card' style='text-align:center;font-size:1.35em;font-weight:800;color:{col};border:2px solid {col}55'>"
+                    f"{txt}<div style='font-size:.55em;font-weight:400;opacity:.7'>{T('paper_only')}"
+                    f"{' · ' + T('manual_on') if manual else ''}</div></div>", unsafe_allow_html=True)
+    # ===== ۶) پیش‌نمایش =====
+    if awake:
+        next_decision_preview(dec, now)
     if cap.warning:
         st.warning(cap.warning)
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        bias = int(np.sign(last.evidence)) if awake and abs(last.evidence) >= 0.15 else 0
-        st.markdown(creature_svg(breath, hue, f"تنفس هر {breath:.1f} ثانیه · {mood}", feeling, bias, asleep=not awake),
-                    unsafe_allow_html=True)
-    with c2:
-        a, b, c = st.columns(3)
-        a.metric("قیمت طلا (۱ دقیقه)", f"{price:,.2f}", f"{price - prev:+.2f}")
-        b.metric("💼 حساب کاغذی زنده ($)", f"{acc.equity + unreal:,.2f}", f"{(acc.equity + unreal) / acc.state['start_equity'] - 1:+.2%}")
-        c.metric("سود/زیان باز", f"{unreal:+,.2f}" if pos else "—", f"{unreal:+.2f}" if pos else None)
-        old_px = st.session_state.get("paxg", paxg)
-        st.metric("🪙 PAXG-USD (توکن طلا، ۲۴/۷ — نه آتی)", f"{paxg:,.2f}" if paxg else "—",
-                  f"{paxg - old_px:+.2f}" if paxg and old_px else None)
-        st.session_state["paxg"] = paxg
-        if paxg and mins is not None:
-            st.caption(f"اسپرد PAXG − GC=F: {paxg - price:+,.2f} $ ({(paxg / price - 1):+.2%}) · منبع قیمت طلا: {price_src}. "
-                       "معاملات ۲۴/۷ PAXG به معنای باز بودن بازار آتی طلا نیست.")
-        x, y, z = st.columns(3)
-        btc, eth = crypto_ticker("BTC-USD"), crypto_ticker("ETH-USD")
-        old_btc, old_eth = st.session_state.get("btc", btc), st.session_state.get("eth", eth)
-        x.metric("BTC", f"{btc:,.0f}" if btc else "—", f"{btc - old_btc:+.1f}" if btc and old_btc else None)
-        y.metric("ETH", f"{eth:,.1f}" if eth else "—", f"{eth - old_eth:+.2f}" if eth and old_eth else None)
-        st.session_state["btc"], st.session_state["eth"] = btc, eth
-        z.metric("معاملات زنده", len(lt))
-        st.caption(f"💶 سقف مجازی: {cap.eur:,.2f} € ≈ {cap.usd:,.2f} $ · ریسک هر معامله ≤ {cap.risk_usd:,.2f} $ (۱٪) · "
-                   f"توقف خودکار: {cap.stop_usd:,.2f} $ (۷۰٪) · نرخ EUR/USD {cap.rate:.4f} "
-                   f"({cap.source}، {pd.Timestamp(cap.timestamp).tz_convert(BERLIN):%Y-%m-%d %H:%M} برلین) · "
-                   f"حساب زنده از {pd.Timestamp(acc.state['created']).tz_convert(BERLIN):%Y-%m-%d %H:%M} برلین")
-    # ---------- کارت سیگنال (فقط وقتی دروازه‌ی اطمینان بالا باز است) ----------
-    oc = cfg.organism
-    bar_end = j.index[-1] + pd.Timedelta(hours=INTERVAL_H[interval])
-    conf = float(max(last.P_bull, last.P_bear, last.P_range) * (1 - last.doubt))
-    if awake and last.action in ("LONG", "SHORT"):
-        d = 1 if last.action == "LONG" else -1
-        atr = float(feat["ATR"].iloc[-1]); entry = float(last.close)
-        col = "#00cc66" if d > 0 else "#ff3366"
-        st.markdown(f"<div style='direction:rtl;border:4px solid {col};border-radius:18px;padding:16px;background:{col}22'>"
-                    f"<div style='font-size:2.4em;font-weight:bold;color:{col}'>{last.action}</div>"
-                    f"<div>ورود ≈ {entry:,.2f} · استاپ {entry - d * atr * oc.stop_atr_mult:,.2f} · تارگت {entry + d * atr * oc.target_atr_mult:,.2f}</div>"
-                    f"<div>اطمینان {conf:.0%} · بازه {interval} · صادرشده {bar_end.tz_convert(BERLIN):%Y-%m-%d %H:%M} برلین · "
-                    f"انقضا {(bar_end + pd.Timedelta(hours=INTERVAL_H[interval])).tz_convert(BERLIN):%H:%M}</div>"
-                    f"<div>{last.reason}</div></div>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"<div style='direction:rtl;border:2px solid #888;border-radius:18px;padding:12px'>"
-                    f"<span style='font-size:1.8em;font-weight:bold;color:#aaa'>WAIT</span> — "
-                    f"{last.reason if awake else 'ارگانیسم خواب است'}</div>", unsafe_allow_html=True)
-    # ---------- کارنامه‌ی تأییدشده ----------
+    warning_box()
+    # ===== جزئیات (جمع‌شده) =====
     n_live = len(lt); win_live = float((lt["pnl"] > 0).mean()) if n_live else 0.0
     pnl_live = float(lt["pnl"].sum()) if n_live else 0.0
     replay_ret = float(j["juice"].iloc[-1] / cap.usd - 1)
-    st.markdown(f"<div style='direction:rtl;opacity:.9'>📊 کارنامه‌ی حساب کاغذی زنده: {n_live} سیگنال · نرخ برد {win_live:.0%} · "
-                f"سود/زیان {pnl_live:+,.2f} $ · بازپخش تاریخی: {replay_ret:+.1%}</div>", unsafe_allow_html=True)
-    st.warning(WARNING_3L)
-    if not awake:
-        st.info("💤 ارگانیسم خواب است و هیچ سیگنال یا معامله‌ی جدیدی نمی‌دهد. جدول‌های پایین «تاریخچه»اند، نه سیگنال زنده.")
-    if not lt.empty:
-        with st.expander("📒 معاملات حساب کاغذی زنده (وقت برلین)"):
+    gc_age = (now - mins.index[-1]).total_seconds() / 60 if mins is not None else None
+    pm = gold_minutes_all()
+    pm_age = (now - pm.index[-1]).total_seconds() / 60 if pm is not None and len(pm) else None
+    bar_age = (now - conf_dec.bar_close).total_seconds() / 60
+    fmt = lambda v: "—" if v is None else f"{v:.0f} min"
+    delayed = gc_age is not None and gc_age > 20
+    with st.expander(T("details")):
+        st.markdown(f"<div class='card' style='padding:4px'>{T('track', n=n_live, w=win_live, p=pnl_live, r=replay_ret)}</div>",
+                    unsafe_allow_html=True)
+        st.caption(dec.market_reason)
+        st.caption(T("feed_ages", p=fmt(pm_age), b=fmt(bar_age), g=fmt(gc_age)) + (f" · 🟠 {T('gc_delayed')}" if delayed else ""))
+        if fut and paxg:
+            st.caption(T("fut_ref", f=fut, d=fut - paxg, p=fut / paxg - 1))
+        st.caption(T("cap_line", eur=cap.eur, usd=cap.usd, risk=cap.risk_usd, stop=cap.stop_usd, rate=cap.rate, src=cap.source,
+                     ts=f"{pd.Timestamp(cap.timestamp).tz_convert(BERLIN):%Y-%m-%d %H:%M}"))
+        x, y, z = st.columns(3)
+        btc, eth = crypto_ticker("BTC-USD"), crypto_ticker("ETH-USD")
+        x.metric("BTC", f"{btc:,.0f}" if btc else "—"); y.metric("ETH", f"{eth:,.1f}" if eth else "—")
+        z.metric(T("live_trades"), len(lt))
+        if conf_dec.reason and card:
+            st.caption(conf_dec.reason)
+        if L != "fa":
+            st.caption(T("note_reasons"))
+        if not lt.empty:
             st.dataframe(to_berlin(lt.iloc[::-1]), width="stretch")
+    if not awake:
+        st.info(T("asleep_info"))
 
 
 @st.fragment(run_every=timedelta(seconds=300) if live else None)   # بخش سنگین: هر ۵ دقیقه
@@ -343,36 +499,33 @@ def dashboard():
     try:
         raw, cross = get_data(interval)
     except Exception as e:
-        st.error(f"دریافت داده ناموفق بود: {e}"); return
-    with st.spinner("ذهن در حال مرور تاریخچه..."):
+        st.error(T("data_fail", e=e)); return
+    with st.spinner(T("thinking")):
         feat, j, trades, bb, explain, events, strat, extra = run_mind(raw, cross, interval, leverage)
     last = j.iloc[-1]
     cap = capital()
-    st.subheader("🕰️ بازپخش تاریخی (backtest replay) — نه حساب زنده")
-    st.caption(f"ذهن کل پنجره‌ی داده ({to_berlin(j.iloc[[0]]).index[0]} تا {to_berlin(j.iloc[[-1]]).index[0]} برلین) را از "
-               f"{cap.usd:,.2f} $ بازپخش می‌کند و هر بار دوباره محاسبه می‌شود. این عدد سود/زیان واقعی یا زنده نیست.")
-    a, b, c, d = st.columns(4)
-    a.metric("آب‌میوه‌ی بازپخش ($)", f"{last.juice:,.2f}", f"{last.juice / cap.usd - 1:+.1%}")
-    b.metric("معاملات بازپخش", len(trades))
-    c.metric("حالت غالب", f"{FA[last.regime]} {max(last.P_bull, last.P_bear, last.P_range):.0%}")
-    d.metric("استراتژی فعال", last.strategy)
-    st.metric("⚡ انرژی مصرف‌شده‌ی بازپخش (کارمزد باز+بستن)", f"{extra['energy']:,.2f} $",
-              f"{-extra['energy'] / cap.usd:.1%} از سرمایه", delta_color="off")
-    st.caption(f"مصرف انرژی: {ENERGY_FEE_PCT:g}٪ از {'مارجین' if ENERGY_FEE_MODE == 'margin' else 'ارزش اسمی'} در هر باز و هر بستن "
-               f"(≈ {2 * ENERGY_FEE_PCT:g}٪ رفت‌وبرگشت)، روی اسلیپیج/کارمزد معمول. عدم معامله انرژی مصرف نمی‌کند.")
-    with st.expander("🧠 توضیح کامل تصمیم ذهن", expanded=False):
+    with st.expander(T("replay_h"), expanded=False):
+        st.caption(T("replay_cap", a=to_berlin(j.iloc[[0]]).index[0], b=to_berlin(j.iloc[[-1]]).index[0], usd=cap.usd))
+        a, b, c, d, e = st.columns(5)
+        a.metric(T("replay_juice"), f"{last.juice:,.2f}", f"{last.juice / cap.usd - 1:+.1%}")
+        b.metric(T("replay_trades"), len(trades))
+        c.metric(T("regime"), f"{regime(last.regime, L)} {max(last.P_bull, last.P_bear, last.P_range):.0%}")
+        d.metric(T("strategy"), last.strategy)
+        e.metric(T("energy"), f"{extra['energy']:,.2f} $", T("energy_delta", p=-extra['energy'] / cap.usd), delta_color="off")
+        st.caption(T("energy_note", f=ENERGY_FEE_PCT, m=T("margin") if ENERGY_FEE_MODE == "margin" else T("notional"), r=2 * ENERGY_FEE_PCT))
+        st.markdown(f"**{T('explain')}**")
         st.markdown(explain)
 
-    t1, t2, t3, t4, t5 = st.tabs(["📜 تاریخچه‌ی سیگنال‌ها", "📒 معاملات کاغذی", "📈 پیشرفت یادگیری", "🗃️ حافظه", "🪙 کریپتو (کاغذی)"])
+    t1, t2, t3, t6, t4, t5 = st.tabs([T("tab_signals"), T("tab_trades"), T("tab_learning"), T("tab_ledger"), T("tab_memory"), T("tab_crypto")])
     with t5:
         crypto_tab(); credit_footer()
     with t1:
-        st.subheader("📜 تاریخچه‌ی سیگنال‌های کاغذی (وقت برلین) — نه سیگنال زنده")
+        st.subheader(T("sig_hist_h"))
         feed = j[j["action"] != "WAIT"].tail(20)[["close", "action", "strategy", "doubt", "reason"]]
         st.dataframe(to_berlin(feed.iloc[::-1]), width="stretch")
         ch = j.tail(200)
-        fig = go.Figure(go.Scatter(x=ch.index, y=ch.close, name="قیمت", line=dict(color="#00ffcc")))
-        for act, col, sym in (("LONG", "#00cc66", "triangle-up"), ("SHORT", "#ff3366", "triangle-down")):
+        fig = go.Figure(go.Scatter(x=ch.index, y=ch.close, name=T("price"), line=dict(color=GOLD)))
+        for act, col, sym in (("LONG", COL["LONG"], "triangle-up"), ("SHORT", COL["SHORT"], "triangle-down")):
             p = ch[ch.action == act]
             fig.add_trace(go.Scatter(x=p.index, y=p.close, mode="markers", name=act, marker=dict(color=col, size=10, symbol=sym)))
         fig.update_layout(template="plotly_dark", height=320, margin=dict(l=10, r=10, t=10, b=10))
@@ -380,69 +533,70 @@ def dashboard():
         credit_footer()
     with t2:
         if trades.empty:
-            st.info("هنوز معامله‌ی کاغذی بسته‌شده‌ای نیست.")
+            st.info(T("no_trades"))
         else:
             w = (trades.pnl > 0).mean()
             x, y, z = st.columns(3)
-            x.metric(f"نرخ برد ({leverage}x)", f"{w:.0%}"); y.metric("میانگین R", f"{trades.R.mean():+.2f}")
-            z.metric("لیکوئید", int((trades.reason == "liquidation").sum()))
-            st.subheader("📜 تاریخچه‌ی معاملات کاغذی (وقت برلین)")
+            x.metric(T("win_rate", l=leverage), f"{w:.0%}"); y.metric(T("mean_r"), f"{trades.R.mean():+.2f}")
+            z.metric(T("liquidated"), int((trades.reason == "liquidation").sum()))
+            st.subheader(T("trades_h"))
             st.dataframe(to_berlin(trades.tail(30).iloc[::-1]), width="stretch")
         credit_footer()
     with t3:
-        fig = go.Figure(go.Scatter(x=j.index, y=j.juice, name="آب‌میوه", line=dict(color="#ffcc00")))
-        fig.update_layout(template="plotly_dark", height=250, margin=dict(l=10, r=10, t=30, b=10), title="منحنی آب‌میوه")
+        fig = go.Figure(go.Scatter(x=j.index, y=j.juice, name=T("juice"), line=dict(color=GOLD)))
+        fig.update_layout(template="plotly_dark", height=250, margin=dict(l=10, r=10, t=30, b=10), title=T("juice_curve"))
         st.plotly_chart(fig, width="stretch")
-        fig = go.Figure(go.Scatter(x=j.index, y=j.trust, name="اعتماد به شهود", line=dict(color="#cc88ff")))
-        fig.update_layout(template="plotly_dark", height=220, margin=dict(l=10, r=10, t=30, b=10), title="اعتماد به شهود (به تفکیک رژیم فعلی)")
+        fig = go.Figure(go.Scatter(x=j.index, y=j.trust, name=T("trust"), line=dict(color="#cc88ff")))
+        fig.update_layout(template="plotly_dark", height=220, margin=dict(l=10, r=10, t=30, b=10), title=T("trust"))
         st.plotly_chart(fig, width="stretch")
-        with st.spinner(f"میدان تکامل با {pop:,} ژنوم..."):
+        with st.spinner(T("arena_spin", n=pop)):
             arena, cut = run_arena_cached(raw, cross, interval, pop)
         fig = go.Figure()
         rows = []
         for lev, r in arena.items():
             h = r["history"]
-            fig.add_trace(go.Scatter(x=h.generation, y=h.survival, mode="lines+markers", name=f"بقا {lev:g}x"))
+            fig.add_trace(go.Scatter(x=h.generation, y=h.survival, mode="lines+markers", name=f"{T('survival')} {lev:g}x"))
             dfl = r["deflation"]
-            rows.append({"سطح": f"{lev:g}x", "بقای قهرمانان OOS": dfl["champ_oos_survival"],
-                         "لیکوئید قهرمانان OOS": dfl["champ_oos_liquidated"], "بازده میانه قهرمانان": dfl["champ_oos_median_ret"],
-                         "بازده میانه تصادفی": dfl["random_oos_median_ret"], "صدک در برابر تصادفی": dfl["champ_pctile_vs_random"]})
+            rows.append({T("tier"): f"{lev:g}x", T("c_surv"): dfl["champ_oos_survival"],
+                         T("c_liq"): dfl["champ_oos_liquidated"], T("c_ret"): dfl["champ_oos_median_ret"],
+                         T("r_ret"): dfl["random_oos_median_ret"], T("pctile"): dfl["champ_pctile_vs_random"]})
         fig.update_layout(template="plotly_dark", height=260, margin=dict(l=10, r=10, t=30, b=10),
-                          title="منحنی بقا در نسل‌ها (فقط IS)", xaxis_title="نسل", yaxis_title="سهم بازمانده")
+                          title=T("survival_curve"), xaxis_title=T("generation"), yaxis_title=T("surv_share"))
         st.plotly_chart(fig, width="stretch")
-        st.caption(f"OOS از {cut} — قهرمانان در برابر ژنوم‌های تصادفی (آزمون آزمون‌های چندگانه)")
+        st.caption(T("oos_note", c=cut))
         st.dataframe(pd.DataFrame(rows).round(3), width="stretch")
-        st.dataframe(pd.DataFrame(strat).T.rename(columns={"score": "امتیاز EWMA (R)", "n": "تعداد", "demoted_until": "تنزل تا کندل"}),
+        st.dataframe(pd.DataFrame(strat).T.rename(columns={"score": T("score"), "n": T("count"), "demoted_until": T("demoted")}),
                      width="stretch")
         credit_footer()
     with t4:
-        st.subheader("جعبه‌سیاه اشتباهات")
-        st.dataframe(bb.tail(30).iloc[::-1] if not bb.empty else pd.DataFrame({"پیام": ["خالی"]}), width="stretch")
-        st.subheader("دفتر روزنامه‌ی تصمیم‌ها")
+        st.subheader(T("blackbox"))
+        st.dataframe(bb.tail(30).iloc[::-1] if not bb.empty else pd.DataFrame({T("msg"): [T("empty")]}), width="stretch")
+        st.subheader(T("journal"))
         st.dataframe(to_berlin(j.tail(50).iloc[::-1][["action", "reason", "intuition", "evidence", "doubt", "trust", "juice"]]), width="stretch")
-        st.download_button("دانلود دفتر (CSV)", j.to_csv().encode("utf-8"), "journal.csv", "text/csv")
-        st.subheader("📓 دفتر تصمیم (همه‌ی گزینه‌ها: LONG / SHORT / NO_TRADE)")
+        st.download_button(T("dl_journal"), j.to_csv().encode("utf-8"), "journal.csv", "text/csv")
+        st.subheader(T("events"))
+        st.write([e[1] for e in events[-15:]])
+        credit_footer()
+    with t6:
+        st.subheader(T("ledger_h"))
         led = extra["ledger"]
         if led.empty:
-            st.info("دفتر خالی است.")
+            st.info(T("ledger_empty"))
         else:
             from core.ledger import summarize
-            st.caption("نتیجه‌ی گزینه‌های انتخاب‌نشده با همان قواعد TP/SL/حداکثر نگهداری (خلاف‌واقع) حل می‌شود؛ "
-                       "یادگیری فقط از نتایج حل‌شده‌ی گذشته. آب‌میوه = سود/زیان با اهرم پس از انرژی، به‌صورت سهم مارجین.")
-            st.markdown("**خروج‌ها و آب‌میوه به تفکیک مدل**")
+            st.caption(T("ledger_note"))
+            st.markdown(f"**{T('per_model')}**")
             st.dataframe(summarize(led).round(3), width="stretch")
             show = led.tail(60).iloc[::-1][["time", "option", "chosen", "suggested", "confidence", "model", "tier", "timeframe",
                                             "exit_time", "exit_reason", "pct", "juice", "energy"]]
             st.dataframe(show, width="stretch")
-            st.download_button("دانلود دفتر تصمیم (CSV)", led.to_csv(index=False).encode("utf-8"), "decision_ledger.csv", "text/csv")
-            st.caption(f"پشیمانی دروازه‌ها (EMA آب‌میوه‌ی وتوشده‌ها): {extra['gate_regret']:+.3f}")
-        st.subheader("رویدادها")
-        st.write([e[1] for e in events[-15:]])
+            st.download_button(T("dl_ledger"), led.to_csv(index=False).encode("utf-8"), "decision_ledger.csv", "text/csv")
+            st.caption(T("regret", v=extra["gate_regret"]))
         credit_footer()
 
 
 live_panel()
 dashboard()
 st.sidebar.markdown("---")
-st.sidebar.markdown(CREDIT_FA)
+st.sidebar.caption(CREDIT[L])
 credit_footer()
