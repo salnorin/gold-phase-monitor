@@ -67,6 +67,10 @@ def mind_features(feat: pd.DataFrame, cfg: MindConfig) -> pd.DataFrame:
     f["Vol_Ratio"] = (f["ATR"] / atr_norm).fillna(1.0)
     prev_atr = f["ATR"].shift(1).fillna(f["ATR"])
     f["Whale"] = (f["Oxygen"] > cfg.whale_volume) | ((f["High"] - f["Low"]) > cfg.whale_range_atr * prev_atr)
+    if "Whale_Event" in f:                       # خوراک‌های بیرونی نهنگ (Arkham/پراکسی)
+        f["Whale"] = f["Whale"] | f["Whale_Event"].astype(bool)
+    if "DeFi_Oxygen" in f:                       # جریان نقدینگی DeFi اکسیژن را تا ±۵۰٪ تنظیم می‌کند
+        f["Oxygen"] = f["Oxygen"] * (1 + 0.5 * f["DeFi_Oxygen"].clip(-1, 1))
     ema = f["Close"].ewm(span=20, adjust=False).mean()
     slope = ((ema - ema.shift(5)) / f["ATR"].replace(0, np.nan)).fillna(0).clip(-5, 5).values
     logits = np.stack([2 * slope, -2 * slope, 1.0 - 2 * np.abs(slope)], axis=1)

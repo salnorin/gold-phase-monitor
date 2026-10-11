@@ -88,3 +88,11 @@ evolved champions lose less than random genomes OOS (~98th percentile) but still
 
 ## Credits
 Built by Intelgy (AI assistant) with co-creator salnorin. See [AUTHORS](AUTHORS).
+
+## Crypto section (paper only) — `core/crypto.py`, `core/defi.py`, `core/whales.py`
+- BTC-USD / ETH-USD hourly candles from Coinbase Exchange public API (no key), 24/7 market.
+- Same organs, mind and arena (spot / 10× / 20× tiers) with hard rules: $10 virtual cap, ≤1% risk per trade, auto-stop at $7.
+- DeFi oxygen from DefiLlama free API (TVL 7d change, stablecoin supply 7d change, DEX volume vs 30d median), lagged one day.
+- Whale feeds: free candle-based proxy (always on); Arkham Intelligence adapter activates only if `ARKHAM_API_KEY` is set.
+- Read-only Coinbase CDP portfolio view (`ReadOnlyCoinbase` exposes only list accounts/portfolios). Key is read from
+  `~/.secrets/coinbase_cdp.json`, never committed. **No order, transfer or withdrawal code exists in this repo** (tested).

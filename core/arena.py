@@ -61,7 +61,8 @@ def mutate(parents, n, rng, scale=0.1):
     return clip(kids)
 
 
-def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
+def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0, risk_cap=None, kill_equity=None):
+    """risk_cap: حداکثر ضرر تا استاپ به‌صورت سهم از سرمایه (مثلاً ۰٫۰۱). kill_equity: زیر این سطح ژنوم حذف می‌شود."""
     """همه‌ی ژنوم‌ها در پنجره‌ی [a, b) با سرمایه‌ی تازه؛ بدون نگاه به آینده (سیگنال در Close، ورود Open بعدی)."""
     o, h, l, c, atr = (df[k].values for k in ("Open", "High", "Low", "Close", "ATR"))
     N = len(G)
@@ -84,6 +85,9 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
             slip = o[i] * cm.base_spread + atr[i - 1] * cm.vol_slippage
             e = o[i] + dd_ * slip
             m = eq[op] * mf[op]
+            if risk_cap is not None:
+                sd = atr[i - 1] * sm[op] / e
+                m = np.minimum(m, risk_cap * eq[op] / (cm.leverage * np.maximum(sd, 1e-9)))
             q = m * cm.leverage / e
             entry[op] = e; qty[op] = q; margin[op] = m; d[op] = dd_
             stop[op] = e - dd_ * atr[i - 1] * sm[op]; target[op] = e + dd_ * atr[i - 1] * tm[op]
@@ -115,7 +119,7 @@ def simulate_population(G, F, df, a, b, cm: CostModel, start_equity=10_000.0):
                 trades[closing] += 1; wins[closing & (pnl > 0)] += 1
                 inpos[closing] = False
                 liquidated |= closing & liq_hit
-                alive &= ~liquidated & (eq > start_equity * 0.1)
+                alive &= ~liquidated & (eq > (kill_equity if kill_equity is not None else start_equity * 0.1))
                 peak = np.maximum(peak, eq); maxdd = np.maximum(maxdd, 1 - eq / peak)
         # سیگنال
         if i < b - 1:
@@ -143,14 +147,14 @@ def fitness(r, rank="return"):
     return np.where(surv, score, -np.inf), surv
 
 
-def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0, warmup=250, rank="return"):
+def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0, warmup=250, rank="return", sim_kw=None):
     """تکامل walk-forward روی [warmup, is_end): هر نسل روی پنجره‌ی زمانی بعدی."""
     rng = np.random.default_rng(seed)
     G = random_genomes(pop, rng)
     edges = np.linspace(warmup, is_end, generations + 1).astype(int)
     history = []
     for g in range(generations):
-        r = simulate_population(G, F, df, edges[g], edges[g + 1], cm)
+        r = simulate_population(G, F, df, edges[g], edges[g + 1], cm, **(sim_kw or {}))
         surv = r["alive"] & (r["trades"] > 0)
         history.append(dict(generation=g + 1, start=df.index[edges[g]], end=df.index[edges[g + 1] - 1],
                             survival=float(surv.mean()), liquidated=float(r["liquidated"].mean()),
@@ -166,19 +170,19 @@ def evolve(F, df, is_end, cm, pop=10_000, generations=8, elite_frac=0.2, seed=0,
         elite = G[order[:n_elite]]
         G = np.vstack([elite, mutate(elite, pop - n_elite, rng)])
     # بازامتیازدهی نهایی روی کل IS (نه فقط آخرین پنجره) برای انتخاب قهرمانان
-    final = simulate_population(G, F, df, edges[0], is_end, cm)
+    final = simulate_population(G, F, df, edges[0], is_end, cm, **(sim_kw or {}))
     return G, final, pd.DataFrame(history)
 
 
-def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1, rank="return", champs=None):
+def deflation_test(G, final, F, df, a, b, cm, k=50, n_random=2000, seed=1, rank="return", champs=None, sim_kw=None):
     """قهرمانان (k بهترین بازمانده‌ی IS) در برابر k ژنوم تصادفی؛ آزمون مجدد روی OOS."""
     rng = np.random.default_rng(seed)
     if champs is None:
         score, surv = fitness(final, rank)
         champs = G[np.argsort(-score)[:min(k, int(surv.sum()))]]
-    rc = simulate_population(champs, F, df, a, b, cm)
+    rc = simulate_population(champs, F, df, a, b, cm, **(sim_kw or {}))
     R = random_genomes(n_random, rng)
-    rr = simulate_population(R, F, df, a, b, cm)
+    rr = simulate_population(R, F, df, a, b, cm, **(sim_kw or {}))
     # توزیع میانه‌ی بازده k ژنوم تصادفی (بوت‌استرپ)
     boots = np.array([np.median(rr["ret"][rng.integers(0, n_random, len(champs))]) for _ in range(2000)])
     champ_med = float(np.median(rc["ret"])) if len(champs) else np.nan

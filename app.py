@@ -76,6 +76,50 @@ def creature_svg(breath_s, hue, label):
 </svg></div>"""
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def crypto_data(product):
+    from core.crypto import fetch_candles, crypto_features, run_crypto_mind
+    from core.defi import fetch_defi, defi_signals
+    try:
+        sig = defi_signals(fetch_defi())
+    except Exception:
+        sig = None
+    raw = fetch_candles(product, "1h", 2000)
+    f = crypto_features(raw, product, sig)
+    m, j = run_crypto_mind(raw, feat=f)
+    return j, m.trades_frame(), m.blackbox_frame(), f.attrs.get("whale_feeds", []), sig is not None, m.explain()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def portfolio_view():
+    from core.crypto import ReadOnlyCoinbase
+    return ReadOnlyCoinbase().balances()
+
+
+def crypto_tab():
+    st.caption("فقط کاغذی: سقف مجازی ۱۰ دلار، حداکثر ریسک ۱٪ در هر معامله، توقف خودکار در ۷ دلار. بازار ۲۴/۷. هیچ سفارش واقعی.")
+    product = st.radio("دارایی", ["BTC-USD", "ETH-USD"], horizontal=True)
+    try:
+        j, trades, bb, feeds, has_defi, expl = crypto_data(product)
+    except Exception as e:
+        st.error(f"داده‌ی کریپتو در دسترس نیست: {e}"); return
+    last = j.iloc[-1]
+    a, b, c, d = st.columns(4)
+    a.metric("🧃 آب‌میوه مجازی", f"${last.juice:.2f}", f"{last.juice / 10 - 1:+.1%}")
+    b.metric("قیمت", f"{last.close:,.2f}")
+    c.metric("🫁 اکسیژن (با DeFi)" if has_defi else "🫁 اکسیژن", f"{last.oxygen:.2f}")
+    d.metric("اقدام", last.action)
+    st.markdown(expl)
+    st.caption(f"خوراک نهنگ: {', '.join(feeds)} | DefiLlama: {'فعال' if has_defi else 'در دسترس نیست'}")
+    st.dataframe(trades.tail(20).iloc[::-1] if not trades.empty else pd.DataFrame({"پیام": ["هنوز معامله‌ای نیست"]}), width="stretch")
+    st.subheader("پرتفوی واقعی (فقط‌خواندنی)")
+    try:
+        bal, tot = portfolio_view()
+        st.dataframe(bal, width="stretch"); st.dataframe(tot, width="stretch")
+    except Exception as e:
+        st.info(f"کلید فقط‌خواندنی پیدا نشد یا اتصال ناموفق بود ({type(e).__name__}).")
+
+
 @st.fragment(run_every=timedelta(seconds=240) if live else None)
 def dashboard():
     try:
@@ -116,7 +160,9 @@ def dashboard():
     with st.expander("🧠 توضیح کامل تصمیم ذهن", expanded=False):
         st.markdown(explain)
 
-    t1, t2, t3, t4 = st.tabs(["📡 جریان سیگنال‌ها", "📒 معاملات کاغذی", "📈 پیشرفت یادگیری", "🗃️ حافظه"])
+    t1, t2, t3, t4, t5 = st.tabs(["📡 جریان سیگنال‌ها", "📒 معاملات کاغذی", "📈 پیشرفت یادگیری", "🗃️ حافظه", "🪙 کریپتو (کاغذی)"])
+    with t5:
+        crypto_tab()
     with t1:
         feed = j[j["action"] != "WAIT"].tail(20)[["close", "action", "strategy", "doubt", "reason"]]
         st.dataframe(feed.iloc[::-1], width="stretch")
