@@ -52,7 +52,7 @@ def test_no_order_code_in_repo():
     root = pathlib.Path(__file__).resolve().parents[1]
     pat = re.compile(r"\.(create_order|market_order|limit_order|place_order|withdraw|send_money)\w*\(")
     for f in list(root.glob("core/*.py")) + [root / "app.py"]:
-        assert not pat.search(f.read_text()), f
+        assert not pat.search(f.read_text(encoding="utf-8")), f
 
 
 def test_secret_not_tracked():
