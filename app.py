@@ -395,8 +395,17 @@ def live_panel():
                            rr=MANUAL_TEST_RR if manual else None)
     from core.exec_prob import apply_exec_prob, exec_prob_default, live_action
     exec_thr = exec_prob_default()
-    final_action, _ = live_action(dec, exec_thr)
-    acc.update(feat, apply_exec_prob(j, exec_thr), awake, signal=final_action)
+    final_action, exec_by = live_action(dec, exec_thr)
+    from core.max_wait import WaitParams, apply_max_wait, queue_forced
+    wp = WaitParams.from_env(start=exec_thr)
+    if not manual:                                    # انقضای انتظار با ساعت دیواری (اجرای هر ۱۵ ثانیه ≠ دور)
+        final_action, exec_by, forced = apply_max_wait(acc, dec, cfg, final_action, exec_by, wp, now=now)
+    else:
+        forced = None
+    acc.update(feat, apply_exec_prob(j, exec_thr), awake, signal=final_action, signal_tag=exec_by or None)
+    if forced:
+        queue_forced(acc, cfg, dec, final_action)
+    acc.save()
     paxg = paxg_price()
     fut = float(mins["Close"].iloc[-1]) if mins is not None else None      # GC=F فقط مرجع
     price = paxg if paxg else dec.price
@@ -444,7 +453,9 @@ def live_panel():
         last_x = f"{r0['direction']} @ {float(r0['entry']):,.2f} · {str(r0['entry_time'])[:16]}"
     else:
         last_x = None
+    cdd = dec.confirmed or dec
     st.markdown(f"<div class='card' style='border:1px solid #22c55e88'><b>{T('auto_on', p=exec_thr)}</b><br>"
+                f"<span dir='ltr'>closed bar: LONG {cdd.P_bull:.0%} · SHORT {cdd.P_bear:.0%} · max-wait {acc.state.get('wait_count', 0)}/{wp.max_wait}</span><br>"
                 f"{T('last_exec', x=last_x) if last_x else T('last_exec_none')}</div>", unsafe_allow_html=True)
     auto_paper_panel(acc, price, cap, now)
     # ===== ۲) با کمک رسول واحد =====
