@@ -136,3 +136,35 @@ Settings can go in `colony.json`: `max_instances`, `initial`, `rss_limit_mb`, `c
 - **Missed bars:** signals on bars that closed while the app wasn't running still count. The newest bar counts only when the organism is awake and the CME market is open.
 - **Panel:** "📈 معاملات کاغذی خودکار" near the top shows a success card (🐂 net profit / 🐻 net loss / ⚖️ no closed trades), starting capital in EUR and USD, current equity, change, win rate, average win/loss, max drawdown, open position with floating P&L against live PAXG, history, and CSV download and restore.
 - **Persistence:** state is saved to a local JSON file plus an SQLite mirror. **Streamlit Cloud storage is ephemeral**, so download the CSV, or run `python -m core.recorder` on your PC or in Termux (every 60 s, persistent SQLite; `--once` for cron; `--export trades.csv`).
+
+## اجرا روی ترموکس (نسخه سبک)
+
+روی ترموکس Streamlit/pyarrow/cryptography نصب نمی‌شوند؛ این نسخه فقط به `flask` نیاز دارد.
+
+```
+pkg update && pkg install -y python git python-numpy tmux
+cd ~/gold2            # یا هر جا که مخزن را clone کرده‌اید
+git fetch origin && git checkout termux-lite
+pip install pandas yfinance requests tzdata flask
+```
+
+**یک نسخه (ضبط‌کننده + داشبورد):**
+
+```
+termux-wake-lock
+python -m core.recorder &          # هر ۶۰ ثانیه؛ دیتا: ~/.local/share/gold-phase-monitor/live_account_gold.sqlite
+python -m dashboard_lite           # مرورگر گوشی: http://127.0.0.1:5000
+```
+
+گزینه‌ها: `--db مسیر` (یا متغیر `GOLD_DB`)، `--port 5000`، `--host 0.0.0.0` (برای دیدن از دستگاه‌های دیگر شبکه). خروجی JSON: `http://127.0.0.1:5000/api/state`. صفحه هر ۶۰ ثانیه تازه می‌شود و زبان فارسی/آلمانی/انگلیسی دارد.
+
+**چند نسخه‌ی مستقل (کلون):**
+
+```
+./scripts/clone_gold.sh gold-a gold-b     # gold-a → :5001 ، gold-b → :5002
+./scripts/clone_gold.sh list
+tmux attach -t gold                       # خروج بدون توقف: Ctrl+B سپس D
+./scripts/clone_gold.sh stop              # توقف همه؛ دیتا پاک نمی‌شود
+```
+
+هر کلون پوشه‌ی دیتای خودش را دارد: `~/.local/share/gold-phase-monitor/<name>/` (فایل JSON حساب، SQLite و پورت). ضبط‌کننده هم مستقیماً می‌پذیرد: `python -m core.recorder --data-dir DIR` و `--db PATH`. فقط معاملات کاغذی؛ هیچ سفارش واقعی.
