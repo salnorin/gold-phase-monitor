@@ -37,7 +37,7 @@ def _acc_kw(data_dir=None):
     return dict(path=Path(data_dir).expanduser() / "live_account_gold.json") if data_dir else {}
 
 
-def cycle(acc_kw=None, interval="1h", leverage=20.0, db=None, profile=None, mom=None):
+def cycle(acc_kw=None, interval="1h", leverage=20.0, db=None, profile=None, mom=None, exec_prob=None, wait=None):
     """profile: normal (پیش‌فرض، ارگانیسم بدون تغییر) | strict | active (مومنتوم). env GOLD_PROFILE."""
     import os
     from core import gold_price
@@ -50,10 +50,15 @@ def cycle(acc_kw=None, interval="1h", leverage=20.0, db=None, profile=None, mom=
     profile = profile or os.getenv("GOLD_PROFILE", "normal")
     cap = paper_capital()
     cfg = capital_mind_config(cap, leverage=float(leverage), bar_hours=1.0, **profile_overrides(profile))
+    from core.live_learning import LiveLearner, enabled
+    acc = LivePaperAccount("gold", cap.usd, cfg, **(acc_kw or {}))
+    learner = LiveLearner.for_account(acc.path) if enabled() else None
+    if learner:                                    # فقط از معاملات زنده‌ی بسته‌شده‌ی گذشته
+        cfg = learner.apply(cfg)
+        acc.cfg = cfg
     raw = gold_price.candles(interval, 2000)
     now = pd.Timestamp.now(tz="UTC")
-    dec, ctx = organism_decision(raw, cfg, now)
-    acc = LivePaperAccount("gold", cap.usd, cfg, **(acc_kw or {}))
+    dec, ctx = organism_decision(raw, cfg, now, mind_hook=learner.seed_mind if learner else None)
     if profile == "active":
         from core.momentum import momentum_journal
         mp = mom or momentum_params()
@@ -63,9 +68,35 @@ def cycle(acc_kw=None, interval="1h", leverage=20.0, db=None, profile=None, mom=
         why = momentum_breakdown(raw, mp, action)
         why["items"].insert(0, dict(k="market", ok=not dec.asleep, v=dec.market_state))
     else:
-        action = live_signal(dec)
-        n = acc.update(ctx["feat"], ctx["journal"], not dec.asleep, signal=action)
+        from core.exec_prob import apply_exec_prob, exec_prob_default, live_action
+        thr = exec_prob_default(exec_prob)
+        action, exec_by = live_action(dec, thr)
+        from core.max_wait import WaitParams, step_wait
+        c = dec.confirmed or dec
+        wp = wait or WaitParams.from_env(start=thr)
+        action, forced = step_wait(acc.state, action, c.P_bull, c.P_bear, not dec.asleep,
+                                   acc.state["position"] is None and not acc.state.get("pending"), c.reason, wp,
+                                   killed=acc.equity <= cfg.kill_equity)
+        exec_by = forced or exec_by
+        n = acc.update(ctx["feat"], apply_exec_prob(ctx["journal"], thr), not dec.asleep, signal=action,
+                       signal_tag=exec_by or None)
+        if forced and acc.state["position"] is None and not acc.state.get("pending"):
+            # کندل جدیدی نیامده (update کاری نکرد) → ورود اجباری در Open کندل بعدی
+            acc.state["pending"] = [1 if action == "LONG" else -1, float(min(cfg.max_risk, cfg.base_risk)),
+                                    float(max(c.P_bull, c.P_bear)), "forced"]
+        acc.save()
         why = gate_breakdown(dec, ctx, cfg, raw, profile)
+        why.update(action=action, exec_by=exec_by, exec_prob=thr, wait_count=acc.state.get("wait_count", 0),
+                   max_wait=wp.max_wait, wait_floor=wp.floor)
+    why["auto_exec"] = True
+    why["last_exec"] = acc.state.get("last_event")
+    if learner:
+        c = dec.confirmed or dec
+        if profile != "active":
+            learner.note_signal(c.timestamp, action, c.organ_votes, ctx["mind"].active)
+        learner.learn(acc.state["trades"], acc.equity)
+        learner.save()
+        why["learning"] = learner.summary()
     db = acc.mirror_sqlite(db)
     price = gold_price.ticker()
     s = acc.stats(price, cap.eur, cap.rate)
@@ -94,12 +125,17 @@ def main(argv=None):
     ap.add_argument("--mom-bars", type=int, default=None, help="active: N کندل (env GOLD_MOM_BARS، پیش‌فرض 4)")
     ap.add_argument("--mom-pct", type=float, default=None, help="active: x درصد (env GOLD_MOM_PCT، پیش‌فرض 0.30)")
     ap.add_argument("--explain", action="store_true", help="چاپ کامل دروازه‌ها در هر دور")
+    ap.add_argument("--exec-prob", type=float, default=None,
+                    help="اجرای خودکار وقتی احتمال صعود/نزول ≥ این (env GOLD_EXEC_PROB، پیش‌فرض 0.55؛ 0 = خاموش)")
+    ap.add_argument("--max-wait", type=int, default=None, help="دورهای WAIT پیاپی تا انقضا (env GOLD_MAX_WAIT، پیش‌فرض 23؛ 0 = خاموش)")
+    ap.add_argument("--wait-floor", type=float, default=None, help="کف آستانه پس از انقضا (env GOLD_WAIT_FLOOR، پیش‌فرض 0.50)")
     a = ap.parse_args(argv)
     if a.explain:
         import os
         os.environ["GOLD_EXPLAIN"] = "1"
     kw = _acc_kw(a.data_dir)
     from core.config import momentum_params
+    from core.max_wait import WaitParams
     mom = momentum_params(a.mom_bars, a.mom_pct)
     if a.export:
         from core.fx import paper_capital
@@ -110,7 +146,7 @@ def main(argv=None):
         open(a.export, "wb").write(acc.to_csv()); print(a.export); return 0
     while True:
         try:
-            cycle(kw, db=a.db, profile=a.profile, mom=mom)
+            cycle(kw, db=a.db, profile=a.profile, mom=mom, exec_prob=a.exec_prob, wait=WaitParams.from_env(a.max_wait, a.wait_floor, a.exec_prob))
         except Exception as e:                       # شبکه قطع شد → دور بعد
             print("error:", type(e).__name__, e, flush=True)
         if a.once:

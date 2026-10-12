@@ -88,7 +88,7 @@ def test_app_has_no_independent_decision_logic():
     live = src[src.index("def live_panel"):src.index("@st.fragment(run_every=timedelta(seconds=300)")]
     for bad in ("last.action", "last.evidence", "Mind(", "status_detail(", "np.sign("):
         assert bad not in live, bad
-    assert "organism_decision_cached" in live and "signal=live_signal(dec)" in live
+    assert "organism_decision_cached" in live and "live_action(dec, exec_thr)" in live and "signal=final_action" in live
 
 
 def test_market_state_from_cme_calendar_not_gc_delay():

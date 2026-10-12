@@ -40,6 +40,44 @@ def run_profile(raw, profile, cap, warmup=300, mp=None, leverage=20.0):
                 bars=int((feat.index > start).sum()), start=str(start), end=str(feat.index[-1]))
 
 
+def run_exec(raw, cap, warmup=300, exec_prob=0.55, wait=None, leverage=20.0, cycles_per_bar=60):
+    """normal + اجرای احتمال ≥ exec_prob، و اختیاری انقضای انتظار (wait: WaitParams). گام‌به‌گام کندل به کندل
+    تا شمارنده‌ی انتظار از وضعیت واقعی حساب (پوزیشن باز/در انتظار) استفاده کند. هر کندل ۱ ساعته = cycles_per_bar دور ۱ دقیقه‌ای."""
+    from core.decision import _features
+    from core.exec_prob import apply_exec_prob
+    from core.live_account import LivePaperAccount
+    from core.max_wait import step_wait
+    from core.mind import Mind, capital_mind_config
+    cfg = capital_mind_config(cap, leverage=leverage, bar_hours=1.0)
+    feat = _features(raw, None)
+    j = apply_exec_prob(Mind(cfg).run(feat), exec_prob)
+    start = feat.index[min(warmup, len(feat) - 2)]
+    i0 = int((feat.index <= start).sum())
+    forced_n = 0
+    with tempfile.TemporaryDirectory() as d:
+        acc = LivePaperAccount("gold", cap.usd, cfg, path=Path(d) / "bt.json", now=start)
+        for i in range(i0, len(feat)):
+            r = j.iloc[i]
+            act, tag = r["action"], (r["exec_by"] or None)
+            if wait is not None:
+                mo = bool(feat["Market_Open"].iloc[i]) if "Market_Open" in feat else True
+                act, f = step_wait(acc.state, act, float(r["P_bull"]), float(r["P_bear"]), mo,
+                                   acc.state["position"] is None and not acc.state.get("pending"), r["reason"], wait,
+                                   cycles=cycles_per_bar, killed=acc.equity <= cfg.kill_equity)
+                if f:
+                    tag, forced_n = f, forced_n + 1
+            acc.update(feat.iloc[: i + 1], j.iloc[: i + 1], True, signal=act, signal_tag=tag)
+        st = acc.stats(float(raw["Close"].iloc[-1]))
+        t = acc.trades_frame()
+    label = f"normal+prob{exec_prob:.0%}" + (f"+maxwait{wait.max_wait}" if wait else "")
+    return dict(profile=label, signals=int((j.loc[j.index > start, "action"] != "WAIT").sum()) + forced_n,
+                trades=st["n"], wins=st["wins"], win_rate=st["win_rate"], pnl_usd=round(st["realized"], 2),
+                change_pct=st["change_pct"], max_dd=st["max_dd"],
+                avg_R=float(t["R"].astype(float).mean()) if len(t) else None, by_exec=st["by_exec"],
+                sl_tp_ok=bool(len(t) == 0 or (t["stop"].notna().all() and t["target"].notna().all())),
+                bars=int((feat.index > start).sum()), start=str(start), end=str(feat.index[-1]))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--bars", type=int, default=5000)
@@ -58,8 +96,14 @@ def main(argv=None):
     cap = paper_capital()
     mp = momentum_params(a.mom_bars, a.mom_pct)
     rows = [run_profile(raw, p, cap, a.warmup, mp) for p in a.profiles.split(",")]
+    from core.max_wait import WaitParams
+    rows.append(run_exec(raw, cap, a.warmup))
+    rows.append(run_exec(raw, cap, a.warmup, wait=WaitParams.from_env()))
     df = pd.DataFrame(rows).set_index("profile")
-    print(df.to_string())
+    print(df.drop(columns=["start", "end", "by_exec", "sl_tp_ok"], errors="ignore").to_string())
+    for r in rows:
+        if r.get("by_exec"):
+            print(r["profile"], r["by_exec"], "SL/TP on all trades:", r.get("sl_tp_ok"))
     return 0
 
 
