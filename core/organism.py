@@ -26,11 +26,11 @@ class BiologicalOrganism:
         df = self.respiration.process_respiration(raw)
         if df is None or df.empty:
             return None
-        df = self.motor.calculate_motor_drive(df)
-        df = self.optical.calculate_optical_field(df)
-        df = self.immune.evaluate_toxicity_and_stress(df)
         bar_h = pd.Series(df.index).diff().median().total_seconds() / 3600 if len(df) > 1 else 1.0
         df["Market_Open"] = True if market == "24/7" else open_mask(df.index, bar_h)
+        df = self.motor.calculate_motor_drive(df)       # «عادی» فقط از کندل‌های بازار باز (PAXG ۲۴/۷ معامله می‌شود)
+        df = self.optical.calculate_optical_field(df)
+        df = self.immune.evaluate_toxicity_and_stress(df)
         return df.iloc[warmup:] if len(df) > warmup * 2 else df
 
     def live_cycle(self, symbol=None, interval=None, lookback_days=None):

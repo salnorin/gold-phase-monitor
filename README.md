@@ -129,3 +129,10 @@ Settings can go in `colony.json`: `max_instances`, `initial`, `rss_limit_mb`, `c
 - `fastpath-go/`: optional Go PAXG top-of-book daemon.
 - `native/`: optional Rust arena hot loop.
 - `make test`, `make native`, `make bench`.
+
+## Automatic paper trades (live, paper only)
+- **Opening:** every confirmed LONG/SHORT from the single decision pipeline (`core/decision.py`) opens a paper trade at the next candle's open, at the PAXG price. Each trade stores entry, SL, TP, time and confidence.
+- **Closing:** a trade closes on TP, SL, liquidation, time limit, or an opposite signal (at the next open).
+- **Missed bars:** signals on bars that closed while the app wasn't running still count. The newest bar counts only when the organism is awake and the CME market is open.
+- **Panel:** "📈 معاملات کاغذی خودکار" near the top shows a success card (🐂 net profit / 🐻 net loss / ⚖️ no closed trades), starting capital in EUR and USD, current equity, change, win rate, average win/loss, max drawdown, open position with floating P&L against live PAXG, history, and CSV download and restore.
+- **Persistence:** state is saved to a local JSON file plus an SQLite mirror. **Streamlit Cloud storage is ephemeral**, so download the CSV, or run `python -m core.recorder` on your PC or in Termux (every 60 s, persistent SQLite; `--once` for cron; `--export trades.csv`).

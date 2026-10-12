@@ -15,10 +15,14 @@ class MetabolicMotorSystem:
     def calculate_motor_drive(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         rng = (df["High"] - df["Low"]) / df["Close"]
-        normal = rng.shift(1).rolling(100, min_periods=10).median()
+        op = df["Market_Open"].astype(bool) if "Market_Open" in df else pd.Series(True, index=df.index)
+        # «نوسان عادی» = میانه‌ی کندل‌های بازار باز گذشته؛ ساعات آرام شبانه/آخرهفته‌ی توکن ۲۴/۷ نباید روزهای عادی را «پراسترس» کنند
+        normal = rng.where(op).shift(1).rolling(150, min_periods=10).median()
         rel_vol = (rng / normal).fillna(1.0).clip(0, 6).values
-        vm = df["Volume"].shift(1).rolling(20, min_periods=1).mean().replace(0, np.nan)
-        volf = (df["Volume"] / vm).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(0, 5).values
+        # مقاوم در برابر حجم دم‌پهن (توکن PAXG): نسبت به میانه‌ی گذشته و لگاریتمی، نه میانگین ۲۰ کندل
+        vm = df["Volume"].where(op).shift(1).rolling(80, min_periods=5).median().replace(0, np.nan)
+        volf = (df["Volume"] / vm).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(0, 50).values
+        volf = 1.0 + np.log(np.maximum(volf, 1.0))
         ret = df["Close"].pct_change().fillna(0)
         ret_sd = ret.shift(1).rolling(50, min_periods=10).std().replace(0, np.nan)
         z = (ret / ret_sd).fillna(0).values
