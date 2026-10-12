@@ -19,7 +19,7 @@ from core.paper import CostModel, Position, close_at, open_position, step_positi
 
 DATA_DIR = Path(os.getenv("GPM_DATA_DIR", Path.home() / ".local" / "share" / "gold-phase-monitor"))
 TRADE_COLS = ["entry_time", "exit_time", "direction", "entry", "exit", "stop", "target", "confidence", "reason",
-              "pnl", "R", "energy"]
+              "pnl", "R", "energy", "exec_by"]
 
 
 def _pos_dict(p):
@@ -70,8 +70,11 @@ class LivePaperAccount:
         con.execute("CREATE TABLE IF NOT EXISTS trades (entry_time TEXT, exit_time TEXT, direction TEXT, entry REAL, exit REAL,"
                     " stop REAL, target REAL, confidence REAL, reason TEXT, pnl REAL, R REAL, energy REAL,"
                     " PRIMARY KEY (entry_time, direction))")
+        if "exec_by" not in [r[1] for r in con.execute("PRAGMA table_info(trades)")]:
+            con.execute("ALTER TABLE trades ADD COLUMN exec_by TEXT")       # organism | prob | forced
+        q = f"INSERT OR IGNORE INTO trades ({', '.join(TRADE_COLS)}) VALUES ({', '.join('?' * len(TRADE_COLS))})"
         for t in self.state["trades"]:
-            con.execute("INSERT OR IGNORE INTO trades VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [t.get(k) for k in TRADE_COLS])
+            con.execute(q, [t.get(k) for k in TRADE_COLS])
         con.commit(); con.close()
         return db
 
@@ -130,7 +133,19 @@ class LivePaperAccount:
                     change=eq - s0, change_pct=(eq / s0 - 1) if s0 else 0.0, n=n, wins=int(len(wins)), losses=int(len(losses)),
                     win_rate=(len(wins) / n) if n else None, avg_win=float(wins.mean()) if len(wins) else None,
                     avg_loss=float(losses.mean()) if len(losses) else None, max_dd=dd, mood=mood,
-                    open=bool(self.state["position"]))
+                    open=bool(self.state["position"]), by_exec=self._by_exec(t))
+
+    @staticmethod
+    def _by_exec(t):
+        """نرخ برد جدا برای organism / prob / forced."""
+        out = {}
+        if t.empty:
+            return out
+        tags = t["exec_by"].fillna("organism") if "exec_by" in t else pd.Series("organism", index=t.index)
+        for k, g in t.groupby(tags):
+            p = g["pnl"].astype(float)
+            out[k] = dict(n=int(len(p)), wins=int((p > 0).sum()), win_rate=float((p > 0).mean()), pnl=float(p.sum()))
+        return out
 
     # ---------- چرخه ----------
     def _record(self, P, t):
@@ -139,10 +154,11 @@ class LivePaperAccount:
         self.state["trades"].append(dict(entry_time=str(P.open_time), exit_time=str(t), direction="LONG" if P.direction > 0 else "SHORT",
                                          entry=round(P.entry, 2), exit=round(P.exit, 2), stop=round(P.stop, 2),
                                          target=round(P.target, 2), confidence=meta.get("confidence"), reason=P.reason,
-                                         pnl=round(P.pnl, 2), R=round(P.r_multiple, 2), energy=round(P.energy, 4)))
+                                         pnl=round(P.pnl, 2), R=round(P.r_multiple, 2), energy=round(P.energy, 4),
+                                         exec_by=meta.get("exec_by") or "organism"))
         self.state["last_event"] = dict(kind="closed", reason=P.reason, time=str(t), pnl=round(P.pnl, 2))
 
-    def update(self, feat: pd.DataFrame, journal: pd.DataFrame, awake: bool, signal=None):
+    def update(self, feat: pd.DataFrame, journal: pd.DataFrame, awake: bool, signal=None, signal_tag=None):
         """feat/journal: خروجی Mind روی کندل‌های بسته‌شده (همان اجرای تصمیم یگانه).
         signal: اقدام تأییدشده‌ی Decision برای آخرین کندل (core.decision.live_signal) — بر journal مقدم است.
         awake: فقط برای آخرین کندل (کندل‌های قبلی را وتوهای خود journal — بازار بسته/کهنه — پوشش می‌دهند)."""
@@ -166,7 +182,7 @@ class LivePaperAccount:
             self.state["pending_close"] = False
             # ۱) ورود در Open این کندل
             if self.state["pending"] and pos is None and mopen:
-                d, risk, conf = (self.state["pending"] + [None])[:3]
+                d, risk, conf, tag = (self.state["pending"] + [None, None])[:4]
                 atr = float(atr_prev.loc[t])
                 usable = min(self.state["equity"], c.capital_cap) if c.capital_cap > 0 else self.state["equity"]
                 stop_d = atr * oc.stop_atr_mult
@@ -176,9 +192,10 @@ class LivePaperAccount:
                 p = open_position(cm, usable, d, float(row["Open"]), atr, stop_d, tgt_d, risk_frac=risk, index=0, time=t)
                 if p is not None:
                     pos = _pos_dict(p)
-                    self.state["open_meta"] = dict(confidence=conf)
+                    self.state["open_meta"] = dict(confidence=conf, exec_by=tag or "organism")
                     self.state["last_event"] = dict(kind="opened", direction=d, time=str(t), entry=round(p.entry, 2),
-                                                    stop=round(p.stop, 2), target=round(p.target, 2), confidence=conf)
+                                                    stop=round(p.stop, 2), target=round(p.target, 2), confidence=conf,
+                                                    exec_by=tag or "organism")
             self.state["pending"] = None
             # ۲) گام پوزیشن باز روی همین کندل بسته‌شده
             if pos is not None:
@@ -202,11 +219,14 @@ class LivePaperAccount:
                 continue
             d = 1 if a == "LONG" else -1
             conf = _conf(journal.loc[t])
+            tag = signal_tag if (t == new[-1] and signal is not None) else \
+                (journal.loc[t, "exec_by"] if "exec_by" in journal.columns else None)
+            tag = tag or "organism"
             if pos is None:
-                self.state["pending"] = [d, float(min(c.max_risk, c.base_risk)), conf]
-            elif pos["direction"] != d:
+                self.state["pending"] = [d, float(min(c.max_risk, c.base_risk)), conf, tag]
+            elif pos["direction"] != d and tag != "forced":           # اجباری هرگز پوزیشن باز را برنمی‌گرداند
                 self.state["pending_close"] = True
-                self.state["pending"] = [d, float(min(c.max_risk, c.base_risk)), conf]
+                self.state["pending"] = [d, float(min(c.max_risk, c.base_risk)), conf, tag]
         self.state["position"] = pos
         self.state["last_bar"] = str(new[-1])
         self.save()

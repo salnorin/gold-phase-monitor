@@ -112,12 +112,14 @@ def _features(raw, cross):
 
 
 def organism_decision(raw, cfg, now, cross=None, wake_bar=None, wake_interval_h=None, feed_delay_min=0.0,
-                      minutes=None, rr=None):
-    """raw: کندل‌های بسته‌شده‌ی PAXG-USD. wake_bar: آخرین کندل بسته‌ی مرجع ساعات CME (GC=F ۱ دقیقه).
+                      minutes=None, rr=None, mind_hook=None):
+    """mind_hook(mind): اختیاری، قبل از اجرای ذهن (مثلاً بذر استخر استراتژی از یادگیری زنده).
+    raw: کندل‌های بسته‌شده‌ی PAXG-USD. wake_bar: آخرین کندل بسته‌ی مرجع ساعات CME (GC=F ۱ دقیقه).
     برمی‌گرداند: (Decision, ctx) — ctx = journal/feat/mind/ledger برای جدول‌های تاریخچه (همان اجرای ذهن)."""
     now = pd.Timestamp(now)
     feat = _features(raw, cross)
     m = Mind(cfg)
+    if mind_hook: mind_hook(m)
     j = m.run(feat)                                    # تصمیم روی هر کندل بسته‌شده (بدون وتوی «اکنون»)
     ref = wake_bar if wake_bar is not None else j.index[-1]
     market = status_detail(ref, now, wake_interval_h or cfg.bar_hours, feed_delay_min=feed_delay_min)
@@ -130,6 +132,7 @@ def organism_decision(raw, cfg, now, cross=None, wake_bar=None, wake_interval_h=
             ext = pd.concat([raw, bar[list(raw.columns.intersection(bar.columns))]])
             f2 = _features(ext, cross)
             m2 = Mind(cfg)
+            if mind_hook: mind_hook(m2)
             j2 = m2.run(f2)
             current = _from_row(j2.iloc[-1], m2, f2, cfg, market, True, rr)
     current = replace(current, confirmed=confirmed)

@@ -341,6 +341,8 @@ def advice_box(dec):
 
 def next_decision_preview(dec, now):
     st.markdown(f"#### {T('pv_title')}")
+    from core.exec_prob import exec_prob_default
+    st.caption(T("pv_note", p=exec_prob_default()))
     if not dec.provisional:
         st.caption(T("pv_none")); return
     left = max(pd.Timedelta(0), dec.bar_close - now)
@@ -350,7 +352,7 @@ def next_decision_preview(dec, now):
         st.markdown(preview_svg(dec.lean, dec.confidence, COL.get(dec.action, COL["WAIT"]), pulse), unsafe_allow_html=True)
     with c2:
         st.markdown(f"<div class='card' style='border:1px dashed {GOLD}88'>"
-                    f"<div style='font-size:1.5em;font-weight:800;color:{COL.get(dec.action, COL['WAIT'])}'>{dec.action} · {T('pv_badge')}</div>"
+                    f"<div style='font-size:1.5em;font-weight:800;color:{COL.get(dec.action, COL['WAIT'])}'>{dec.action} {max(dec.P_bull, dec.P_bear):.0%} · {T('pv_badge')}</div>"
                     f"<div style='opacity:.85'>{T('pv_label', t=f'{dec.bar_close.tz_convert(BERLIN):%H:%M}', m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60), n=int((now - dec.timestamp).total_seconds() // 60))}</div>"
                     + gate_bar("LONG · " + T("pv_bull"), dec.P_bull, dec.dominance_thr, COL["LONG"])
                     + gate_bar("SHORT · " + T("pv_bear"), dec.P_bear, dec.dominance_thr, COL["SHORT"])
@@ -380,7 +382,10 @@ def live_panel():
     from core.config import MANUAL_TEST_RISK_EUR, MANUAL_TEST_RR
     acc = LivePaperAccount("gold", cap.usd, cfg, fixed_risk_usd=MANUAL_TEST_RISK_EUR * cap.rate if manual else None,
                            rr=MANUAL_TEST_RR if manual else None)
-    acc.update(feat, j, awake, signal=live_signal(dec))
+    from core.exec_prob import apply_exec_prob, exec_prob_default, live_action
+    exec_thr = exec_prob_default()
+    final_action, _ = live_action(dec, exec_thr)
+    acc.update(feat, apply_exec_prob(j, exec_thr), awake, signal=final_action)
     paxg = paxg_price()
     fut = float(mins["Close"].iloc[-1]) if mins is not None else None      # GC=F فقط مرجع
     price = paxg if paxg else dec.price
@@ -411,7 +416,7 @@ def live_panel():
                        m=int(max(0, (conf_dec.bar_close + pd.Timedelta(hours=INTERVAL_H[interval]) - now).total_seconds()) // 60), s=0)
     else:
         reason_txt = conf_dec.reason if awake else T("no_sig_sleep")
-    shown = live_signal(dec)
+    shown = final_action
     # ===== ۱) وضعیت (یک شیء بازار) =====
     st.markdown(f"<div class='card' style='border:2px solid {colr};background:{colr}1a'>"
                 f"<div style='font-size:1.4em;font-weight:800;color:{colr}'>{icon} {T(status_key(dec))}</div>"
@@ -419,6 +424,17 @@ def live_panel():
                 f"<div style='opacity:.7;font-size:.85em'>{T('last_candle', t=f'{conf_dec.timestamp.tz_convert(BERLIN):%Y-%m-%d %H:%M}', now=f'{now.tz_convert(BERLIN):%H:%M:%S}')}</div></div>",
                 unsafe_allow_html=True)
     # ===== ۱ب) معاملات کاغذی خودکار (از همان Decision) =====
+    ev0 = acc.state.get("last_event") or {}
+    lt0 = acc.trades_frame()
+    if ev0.get("kind") == "opened":
+        last_x = f"{'LONG' if ev0['direction'] > 0 else 'SHORT'} @ {ev0['entry']:,.2f} · SL {ev0['stop']:,.2f} · TP {ev0['target']:,.2f} · {str(ev0['time'])[:16]}"
+    elif not lt0.empty:
+        r0 = lt0.iloc[-1]
+        last_x = f"{r0['direction']} @ {float(r0['entry']):,.2f} · {str(r0['entry_time'])[:16]}"
+    else:
+        last_x = None
+    st.markdown(f"<div class='card' style='border:1px solid #22c55e88'><b>{T('auto_on', p=exec_thr)}</b><br>"
+                f"{T('last_exec', x=last_x) if last_x else T('last_exec_none')}</div>", unsafe_allow_html=True)
     auto_paper_panel(acc, price, cap, now)
     # ===== ۲) با کمک رسول واحد =====
     advice_box(dec)

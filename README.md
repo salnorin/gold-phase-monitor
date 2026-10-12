@@ -136,3 +136,59 @@ Settings can go in `colony.json`: `max_instances`, `initial`, `rss_limit_mb`, `c
 - **Missed bars:** signals on bars that closed while the app wasn't running still count. The newest bar counts only when the organism is awake and the CME market is open.
 - **Panel:** "📈 معاملات کاغذی خودکار" near the top shows a success card (🐂 net profit / 🐻 net loss / ⚖️ no closed trades), starting capital in EUR and USD, current equity, change, win rate, average win/loss, max drawdown, open position with floating P&L against live PAXG, history, and CSV download and restore.
 - **Persistence:** state is saved to a local JSON file plus an SQLite mirror. **Streamlit Cloud storage is ephemeral**, so download the CSV, or run `python -m core.recorder` on your PC or in Termux (every 60 s, persistent SQLite; `--once` for cron; `--export trades.csv`).
+
+## اجرا روی ترموکس (نسخه سبک)
+
+روی ترموکس Streamlit/pyarrow/cryptography نصب نمی‌شوند؛ این نسخه فقط به `flask` نیاز دارد.
+
+```
+pkg update && pkg install -y python git python-numpy tmux
+cd ~/gold2            # یا هر جا که مخزن را clone کرده‌اید
+git fetch origin && git checkout termux-lite
+pip install pandas yfinance requests tzdata flask
+```
+
+**یک نسخه (ضبط‌کننده + داشبورد):**
+
+```
+termux-wake-lock
+python -m core.recorder &          # هر ۶۰ ثانیه؛ دیتا: ~/.local/share/gold-phase-monitor/live_account_gold.sqlite
+python -m dashboard_lite           # مرورگر گوشی: http://127.0.0.1:5000
+```
+
+گزینه‌ها: `--db مسیر` (یا متغیر `GOLD_DB`)، `--port 5000`، `--host 0.0.0.0` (برای دیدن از دستگاه‌های دیگر شبکه). خروجی JSON: `http://127.0.0.1:5000/api/state`. صفحه هر ۶۰ ثانیه تازه می‌شود و زبان فارسی/آلمانی/انگلیسی دارد.
+
+**چند نسخه‌ی مستقل (کلون):**
+
+```
+./scripts/clone_gold.sh gold-a gold-b     # gold-a → :5001 ، gold-b → :5002
+./scripts/clone_gold.sh list
+tmux attach -t gold                       # خروج بدون توقف: Ctrl+B سپس D
+./scripts/clone_gold.sh stop              # توقف همه؛ دیتا پاک نمی‌شود
+```
+
+هر کلون پوشه‌ی دیتای خودش را دارد: `~/.local/share/gold-phase-monitor/<name>/` (فایل JSON حساب، SQLite و پورت). ضبط‌کننده هم مستقیماً می‌پذیرد: `python -m core.recorder --data-dir DIR` و `--db PATH`. فقط معاملات کاغذی؛ هیچ سفارش واقعی.
+
+### «چرا WAIT؟» و پروفایل‌ها
+
+ضبط‌کننده در هر دور دلیل تصمیم را (JSON در ستون `reason` جدول `ticks`) ذخیره می‌کند و داشبورد آن را در کادر «چرا این تصمیم؟» نشان می‌دهد
+(حرکت قیمت ۶۰ دقیقه/۲۴ ساعت، توافق ارگان‌ها، اطمینان، انرژی، غلبه‌ی حالت، تردید، نهنگ، اکسیژن، نوسان، استراحت). «خنثی» در کارت موفقیت فقط یعنی هنوز معامله‌ای بسته نشده.
+
+```
+python -m core.recorder --once --explain                 # چاپ کامل دروازه‌ها
+python -m core.recorder --profile strict                 # normal (پیش‌فرض، بدون تغییر) | strict | active
+python -m core.recorder --profile active --mom-bars 4 --mom-pct 0.3   # یا env: GOLD_PROFILE / GOLD_MOM_BARS / GOLD_MOM_PCT
+./scripts/clone_gold.sh gold-a:normal gold-s:strict gold-m:active
+python -m core.profile_backtest                          # مقایسه‌ی پروفایل‌ها روی تاریخچه‌ی PAXG
+```
+
+`active` = مومنتوم: LONG اگر بازده N کندل > +x٪، SHORT اگر < −x٪، وگرنه WAIT؛ با همان SL/TP، کارمزد و ریسک ۱٪. در بک‌تست ۶ ماه اخیر زیان‌ده بوده؛ فقط برای آزمون کاغذی.
+برای هر پروفایل یک کلون جدا (پوشه‌ی دیتای جدا) بسازید تا حساب‌های کاغذی قاطی نشوند.
+
+### اجرای خودکار، انقضای انتظار و یادگیری زنده (فقط کاغذی)
+
+- هر تصمیم نهایی LONG/SHORT خودکار یک معامله‌ی کاغذی با SL/TP (بر اساس ATR) در Open کندل بعد باز می‌کند؛ هیچ قدم دستی ندارد.
+- `--exec-prob 0.55` (یا `GOLD_EXEC_PROB`): اگر احتمال صعود/نزول ≥ آستانه باشد، اجرا می‌شود (`prob`). وتوهای ریسک می‌مانند. `0` خاموش است.
+- `--max-wait 23 --wait-floor 0.50` (یا `GOLD_MAX_WAIT`/`GOLD_WAIT_FLOOR`): بعد از ۲۳ دور WAIT پیاپی در بازار باز و بدون پوزیشن، آستانه هر دور ۱٪ پایین می‌آید تا ۵۰٪. در کف، طرفی که احتمال بیشتری دارد گرفته می‌شود (`forced`). `0` خاموش است.
+- یادگیری زنده: `learning_gold.json` در پوشه‌ی دیتا (جسارت، ضریب ارگان‌ها، استخر استراتژی). `GOLD_LEARN=0` خاموش است.
+- در بک‌تست، همه‌ی این حالت‌ها زیان‌ده‌تر از normal بوده‌اند (`python -m core.profile_backtest`).
