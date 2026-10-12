@@ -33,6 +33,13 @@ def _conf(jrow):
         return float("nan")
 
 
+def live_feeling(trades):
+    """حال خرس فقط از معاملات بسته‌ی *حساب کاغذی زنده* (هرگز بازپخش تاریخی): happy | sad | none."""
+    if trades is None or trades.empty or "pnl" not in trades or not trades["pnl"].notna().any():
+        return "none"
+    return "happy" if float(trades["pnl"].dropna().iloc[-1]) > 0 else "sad"
+
+
 class LivePaperAccount:
     def __init__(self, asset="gold", start_equity=None, cfg=None, path=None, now=None, fixed_risk_usd=None, rr=None):
         """fixed_risk_usd/rr: پیش‌تنظیم آزمون دستی (ریسک ثابت دلاری تا استاپ، تارگت = rr × فاصله‌ی استاپ)؛ فایل جدا."""

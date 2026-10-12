@@ -373,7 +373,6 @@ def live_panel():
         # باز/بسته از تقویم CME (اصلی) + تازگی کندل‌های PAXG؛ GC=F هرگز وضعیت را «بسته» نمی‌کند
         dec, feat, j = organism_decision_cached(raw, cross, interval, leverage, manual, None, gold_minutes_all(),
                                                 now.floor("15s"))
-        trades = run_mind(raw, cross, interval, leverage)[2]
     except Exception as e:
         st.error(T("data_fail", e=e)); return
     cap = capital()
@@ -394,11 +393,10 @@ def live_panel():
     pos = acc.state["position"]
     unreal = pos["qty"] * (price - pos["entry"]) * pos["direction"] - pos["fees"] - pos["funding"] if pos else 0.0
     lt = acc.trades_frame()
-    feeling = "neutral"
-    if not lt.empty:
-        feeling = "happy" if lt.iloc[-1]["pnl"] > 0 else "sad"
-    elif not trades.empty and "pnl" in trades and trades["pnl"].notna().any():
-        feeling = "happy" if trades["pnl"].dropna().iloc[-1] > 0 else "sad"
+    from core.live_account import live_feeling
+    feeling = live_feeling(lt)                 # فقط حساب زنده؛ بازپخش تاریخی هرگز حال خرس را تعیین نمی‌کند
+    if feeling == "none":
+        feeling = "neutral"
     hue = {"happy": 125, "sad": 0, "neutral": 210}[feeling]
     breath = float(np.clip(4.0 / (max(dec.vol_ratio, 0.2) * max(dec.oxygen, 0.2) ** 0.5), 0.6, 6.0))
     if feeling == "sad":
@@ -406,7 +404,7 @@ def live_panel():
     if not awake:
         breath = 7.0
     mood = {"open": "👀", "closed": "💤", "awaiting": "⏳", "stale": "💤"}[dec.market_state]
-    mood += {"happy": " · " + T("mood_happy"), "sad": " · " + T("mood_sad"), "neutral": ""}[feeling]
+    mood += {"happy": " · " + T("mood_happy"), "sad": " · " + T("mood_sad"), "neutral": " · " + T("mood_none")}[feeling]
     colr = {"open": "#22c55e", "closed": "#64748b", "awaiting": "#f59e0b", "stale": "#f59e0b"}[dec.market_state]
     icon = {"open": "🟢", "closed": "⚫", "awaiting": "🟡", "stale": "🟡"}[dec.market_state]
     if awake and dec.provisional:

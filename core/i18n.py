@@ -94,6 +94,7 @@ S = {
     "no_sig_sleep": ("ارگانیسم خواب است — بدون سیگنال", "Der Organismus schläft — kein Signal", "The organism is asleep — no signal"),
     "breath": ("تنفس هر {s:.1f} ثانیه", "Atem alle {s:.1f} s", "Breath every {s:.1f} s"),
     "mood_happy": ("معامله‌ی آخر: برد 😊", "letzter Trade: Gewinn 😊", "last trade: win 😊"),
+    "mood_none": ("هنوز معامله‌ای نشده", "noch kein Trade", "no trade yet"),
     "mood_sad": ("معامله‌ی آخر: باخت 🤒", "letzter Trade: Verlust 🤒", "last trade: loss 🤒"),
     "gold_1m": ("قیمت طلا (GC=F ۱ دقیقه)", "Goldpreis (GC=F 1 min)", "Gold price (GC=F 1 min)"),
     "live_acc": ("💼 حساب کاغذی زنده ($)", "💼 Live-Papierkonto ($)", "💼 Live paper account ($)"),
