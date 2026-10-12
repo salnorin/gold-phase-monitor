@@ -76,7 +76,11 @@ def mind_features(feat: pd.DataFrame, cfg: MindConfig) -> pd.DataFrame:
     atr_norm = f["ATR"].shift(1).rolling(200, min_periods=20).median()
     f["Vol_Ratio"] = (f["ATR"] / atr_norm).fillna(1.0)
     prev_atr = f["ATR"].shift(1).fillna(f["ATR"])
-    f["Whale"] = (f["Oxygen"] > cfg.whale_volume) | ((f["High"] - f["Low"]) > cfg.whale_range_atr * prev_atr)
+    # آستانه‌های تطبیقی و علّی (فقط گذشته): برای حجم دم‌پهن PAXG، «نهنگ» = بالای صدک ۹۸ گذشته و «اکسیژن کم» = زیر صدک ۱۰
+    past = f["Oxygen"].shift(1).rolling(500, min_periods=50)
+    whale_thr = np.maximum(cfg.whale_volume, past.quantile(0.98).fillna(cfg.whale_volume))
+    f["Low_Oxygen_Thr"] = np.minimum(cfg.low_oxygen, past.quantile(0.10).fillna(cfg.low_oxygen))
+    f["Whale"] = (f["Oxygen"] > whale_thr) | ((f["High"] - f["Low"]) > cfg.whale_range_atr * prev_atr)
     if "Whale_Event" in f:                       # خوراک‌های بیرونی نهنگ (Arkham/پراکسی)
         f["Whale"] = f["Whale"] | f["Whale_Event"].astype(bool)
     if "DeFi_Oxygen" in f:                       # جریان نقدینگی DeFi اکسیژن را تا ±۵۰٪ تنظیم می‌کند
@@ -301,7 +305,7 @@ class Mind:
             elif i < rest_until: hard = "استراحت اجباری (حد ضرر/افت سرمایه)"
             elif row["Vol_Ratio"] > c.vol_rest_ratio: hard = "نوسان بیش از ۲ برابر عادی → استراحت"
             elif i < caution_until: hard = "احتیاط: ردپای نهنگ"
-            elif row["Oxygen"] < c.low_oxygen: hard = "اکسیژن (نقدینگی) کم"
+            elif row["Oxygen"] < row.get("Low_Oxygen_Thr", c.low_oxygen): hard = "اکسیژن (نقدینگی) کم"
             else:   # انگیزه فقط وقتی هیچ حدی فعال نیست، و حداکثر ۰٫۰۵ آستانه را نرم می‌کند
                 dom_thr -= c.purpose_max_effect * purpose
                 # پشیمانی دروازه: اگر وتوها برنده‌ها را (پس از انرژی) رد کرده‌اند کمی شل‌تر، وگرنه سخت‌تر؛ حداکثر ±۰٫۰۳

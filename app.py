@@ -420,6 +420,8 @@ def live_panel():
                 f"<div>{T('action_now')}: <b style='color:{COL[shown]}'>{shown}</b> — {reason_txt}</div>"
                 f"<div style='opacity:.7;font-size:.85em'>{T('last_candle', t=f'{conf_dec.timestamp.tz_convert(BERLIN):%Y-%m-%d %H:%M}', now=f'{now.tz_convert(BERLIN):%H:%M:%S}')}</div></div>",
                 unsafe_allow_html=True)
+    # ===== ۱ب) معاملات کاغذی خودکار (از همان Decision) =====
+    auto_paper_panel(acc, price, cap, now)
     # ===== ۲) با کمک رسول واحد =====
     advice_box(dec)
     # ===== ۳) کارت تصمیم (از Decision.confirmed) =====
@@ -493,6 +495,58 @@ def live_panel():
             st.dataframe(to_berlin(lt.iloc[::-1]), width="stretch")
     if not awake:
         st.info(T("asleep_info"))
+
+
+def auto_paper_panel(acc, price, cap, now):
+    """«معاملات کاغذی خودکار»: کارت موفقیت + پوزیشن باز با P&L شناور در برابر PAXG زنده + تاریخچه + CSV."""
+    stt = acc.stats(price, start_eur=cap.eur, rate=cap.rate)
+    icon = {"bull": "🐂", "bear": "🐻", "neutral": "⚖️"}[stt["mood"]]
+    mcol = {"bull": COL["LONG"], "bear": COL["SHORT"], "neutral": COL["WAIT"]}[stt["mood"]]
+    sign = T("grown") if stt["change"] >= 0 else T("shrunk")
+    pct = lambda v: "—" if v is None else f"{v:.0%}"
+    money = lambda v: "—" if v is None else f"{v:+,.2f} $"
+    st.markdown(f"### {T('auto_h')}")
+    st.markdown(
+        f"<div class='card' style='border:2px solid {mcol};background:{mcol}14'>"
+        f"<div style='display:flex;align-items:center;gap:.6em'><span style='font-size:2.4em'>{icon}</span>"
+        f"<div><div style='font-size:1.25em;font-weight:800;color:{mcol}'>{T('mood_' + stt['mood'])}</div>"
+        f"<div>{T('start_cap', eur=cap.eur, usd=stt['start_usd'], rate=cap.rate)}</div>"
+        f"<div>{T('now_eq', e=stt['equity'])} · <b style='color:{mcol}'>{sign} {stt['change']:+,.2f} $ ({stt['change_pct']:+.2%})</b></div>"
+        f"</div></div></div>", unsafe_allow_html=True)
+    a, b, c, d = st.columns(4)
+    a.metric(T("tot_trades"), stt["n"], f"{stt['wins']}✓ / {stt['losses']}✗", delta_color="off")
+    b.metric(T("win_rate"), pct(stt["win_rate"]))
+    c.metric(T("realized"), f"{stt['realized']:+,.2f} $")
+    d.metric(T("max_dd"), f"{stt['max_dd']:.1%}")
+    st.caption(T("avg_wl", w=money(stt["avg_win"]), l=money(stt["avg_loss"])) + " · " + T("sample_n", n=stt["n"]))
+    pos = acc.state["position"]
+    if pos:
+        side = "LONG" if pos["direction"] > 0 else "SHORT"
+        fl = stt["floating"]
+        st.markdown(f"<div class='card' style='border:2px solid {COL[side]}'><b style='color:{COL[side]}'>{T('open_pos')}: {side}</b> · "
+                    f"{T('entry')} {pos['entry']:,.2f} · SL {pos['stop']:,.2f} · TP {pos['target']:,.2f} · PAXG {price:,.2f} · "
+                    f"<b style='color:{COL['LONG'] if fl >= 0 else COL['SHORT']}'>{T('floating')} {fl:+,.2f} $</b>"
+                    f"<div style='opacity:.7;font-size:.85em'>{T('opened_at')} {pd.Timestamp(pos['open_time']).tz_convert(BERLIN):%Y-%m-%d %H:%M}"
+                    f" · {T('conf')} {pct((acc.state.get('open_meta') or {}).get('confidence'))}</div></div>", unsafe_allow_html=True)
+    else:
+        st.caption(T("no_open_pos") + (f" · {T('pending_entry')}" if acc.state.get("pending") else ""))
+    with st.expander(T("hist_h", n=stt["n"]), expanded=False):
+        lt = acc.trades_frame()
+        if lt.empty:
+            st.info(T("no_auto_trades"))
+        else:
+            show = lt.iloc[::-1].copy()
+            for k in ("entry_time", "exit_time"):
+                show[k] = pd.to_datetime(show[k], utc=True).dt.tz_convert(BERLIN).dt.strftime("%Y-%m-%d %H:%M")
+            st.dataframe(show, width="stretch", hide_index=True)
+        x, y = st.columns(2)
+        x.download_button(T("dl_auto"), acc.to_csv(), "auto_paper_trades.csv", "text/csv", key="dl_auto")
+        up = y.file_uploader(T("ul_auto"), type="csv", key="ul_auto")
+        if up is not None and st.session_state.get("ul_done") != up.file_id:
+            added = acc.import_csv(up.getvalue())
+            st.session_state["ul_done"] = up.file_id
+            st.success(T("ul_ok", n=added))
+        st.caption(T("ephemeral"))
 
 
 @st.fragment(run_every=timedelta(seconds=300) if live else None)   # بخش سنگین: هر ۵ دقیقه

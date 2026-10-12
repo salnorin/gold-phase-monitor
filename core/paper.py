@@ -152,3 +152,15 @@ def step_position(cm: CostModel, p: Position, o, h, l, c, atr, max_hold, index=0
         gross = p.qty * (fill - p.entry) * d
         p.pnl = max(gross, -p.margin) - p.fees - p.funding
     return True
+
+
+def close_at(cm: CostModel, p: Position, px, atr, why, index=0, time=None):
+    """بستن دستی/بازارگونه در قیمت px (مثلاً Open کندل بعد از سیگنال مخالف) با همان هزینه‌ها."""
+    d = p.direction
+    fill = px - d * cm.slip(px, atr)
+    p.exit, p.exit_index, p.exit_time, p.reason = fill, index, time, why
+    en = cm.energy(p.margin, p.qty * fill)
+    p.energy += en
+    p.fees += p.qty * fill * cm.fee_rate + en
+    p.pnl = max(p.qty * (fill - p.entry) * d, -p.margin) - p.fees - p.funding
+    return p
