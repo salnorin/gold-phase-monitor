@@ -295,33 +295,40 @@ def organism_decision_cached(raw, cross, interval, leverage, manual, wake_bar, m
     return dec, ctx["feat"], ctx["journal"]
 
 
-def preview_svg(lean, conf, color, pulse_s):
-    """عقربه‌ی طلایی: −۱ = SHORT (چپ)، +۱ = LONG (راست)؛ نبض با نزدیک شدن بسته شدن کندل تندتر می‌شود."""
-    ang = float(np.clip(lean, -1, 1)) * 80
-    return f"""<div style="display:flex;justify-content:center"><svg viewBox="0 0 240 150" width="300" height="188">
-<style>.pulse{{transform-origin:120px 120px;animation:pl {pulse_s:.2f}s ease-in-out infinite}}
-@keyframes pl{{0%,100%{{opacity:.35;transform:scale(1)}}50%{{opacity:.9;transform:scale(1.08)}}}}
-.orb{{transform-origin:120px 120px;animation:orb 6s linear infinite}}@keyframes orb{{to{{transform:rotate(360deg)}}}}
-.needle{{transform-origin:120px 120px;transform:rotate({ang:.1f}deg);transition:transform 1.2s}}</style>
-<path d="M20 120 A100 100 0 0 1 220 120" stroke="#2a2f3a" stroke-width="16" fill="none"/>
-<path d="M20 120 A100 100 0 0 1 95 25" stroke="{COL['SHORT']}" stroke-width="16" fill="none" opacity=".55"/>
-<path d="M95 25 A100 100 0 0 1 145 25" stroke="{COL['WAIT']}" stroke-width="16" fill="none" opacity=".45"/>
-<path d="M145 25 A100 100 0 0 1 220 120" stroke="{COL['LONG']}" stroke-width="16" fill="none" opacity=".55"/>
-<circle class="pulse" cx="120" cy="120" r="30" fill="{color}" opacity=".4"/>
-<g class="orb"><circle cx="120" cy="52" r="4" fill="{GOLD}"/></g>
-<g class="needle"><line x1="120" y1="120" x2="120" y2="32" stroke="{GOLD}" stroke-width="5" stroke-linecap="round"/></g>
-<circle cx="120" cy="120" r="10" fill="{GOLD}"/>
-<text x="120" y="146" text-anchor="middle" font-size="15" fill="{color}" font-weight="700">{conf:.0%}</text>
-<text x="18" y="146" font-size="12" fill="{COL['SHORT']}">SHORT</text><text x="222" y="146" text-anchor="end" font-size="12" fill="{COL['LONG']}">LONG</text>
+def preview_svg(lean, conf, color, pulse_s, p_long=None, p_short=None):
+    """عقربه: نیم‌دایره‌ی نرم — SHORT قرمز (چپ)، خنثی خاکستری (وسط)، LONG سبز (راست)؛ عقربه با انیمیشن به زاویه می‌رسد.
+    lean ∈ [−1, 1]؛ عدد بزرگ وسط = احتمال طرف غالب (احتمال، نه سیگنال)."""
+    ang = float(np.clip(lean, -1, 1)) * 90
+    side = "LONG" if lean > 0.02 else ("SHORT" if lean < -0.02 else "—")
+    return f"""<div style="display:flex;justify-content:center;direction:ltr"><svg viewBox="0 0 240 190" style="width:100%;max-width:320px;height:auto" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="{COL['SHORT']}"/><stop offset=".5" stop-color="#6b7280"/><stop offset="1" stop-color="{COL['LONG']}"/></linearGradient></defs>
+<style>.ndl{{transform-origin:120px 130px;animation:sw 1.4s cubic-bezier(.2,.9,.3,1.2) forwards}}
+@keyframes sw{{from{{transform:rotate(0deg)}}to{{transform:rotate({ang:.1f}deg)}}}}
+.pulse{{transform-origin:120px 130px;animation:pl {pulse_s:.2f}s ease-in-out infinite}}
+@keyframes pl{{0%,100%{{opacity:.25}}50%{{opacity:.6}}}}</style>
+<path d="M22 130 A98 98 0 0 1 218 130" stroke="#1f2430" stroke-width="20" fill="none" stroke-linecap="round"/>
+<path d="M22 130 A98 98 0 0 1 218 130" stroke="url(#gg)" stroke-width="14" fill="none" stroke-linecap="round" opacity=".9"/>
+<circle class="pulse" cx="120" cy="130" r="22" fill="{color}"/>
+<g class="ndl"><path d="M116.5 130 L120 50 L123.5 130 Z" fill="{GOLD}"/></g>
+<circle cx="120" cy="130" r="9" fill="{GOLD}"/>
+<text x="120" y="172" text-anchor="middle" font-size="30" font-weight="800" fill="{color}">{conf:.0%}</text>
+<text x="120" y="187" text-anchor="middle" font-size="11" fill="#9ca3af">{side}</text>
+<text x="14" y="152" font-size="12" font-weight="700" fill="{COL['SHORT']}">SHORT</text>
+<text x="226" y="152" text-anchor="end" font-size="12" font-weight="700" fill="{COL['LONG']}">LONG</text>
 </svg></div>"""
 
 
-def gate_bar(label, value, thr, color):
-    pct = float(np.clip(value / thr if thr else 0, 0, 1.2))
-    return (f"<div style='margin:4px 0'><div style='display:flex;justify-content:space-between;font-size:.88em'>"
-            f"<span>{label}</span><span>{value:.0%} / {thr:.0%}</span></div>"
-            f"<div style='background:#2a2f3a;border-radius:6px;height:8px'><div style='width:{min(pct, 1) * 100:.0f}%;"
-            f"height:8px;border-radius:6px;background:{color}'></div></div></div>")
+def gate_bar(label, value, thr, color, invert=False):
+    """نوار احتمال تمیز با نشانگر آستانه (LTR داخلی تا در RTL برعکس نشود)."""
+    v = float(np.clip(value, 0, 1)); t = float(np.clip(thr, 0, 1))
+    ok = (v <= t) if invert else (v >= t)
+    return (f"<div style='margin:8px 0'><div style='display:flex;justify-content:space-between;gap:8px;font-size:.88em'>"
+            f"<span dir='auto'>{label}</span><b style='color:{color if ok else '#9ca3af'};white-space:nowrap' dir='ltr'>{v:.0%} / {t:.0%}</b></div>"
+            f"<div style='position:relative;direction:ltr;background:#1f2430;border-radius:7px;height:10px;margin-top:3px'>"
+            f"<div style='width:{v * 100:.1f}%;height:10px;border-radius:7px;background:{color};opacity:{1 if ok else .6};transition:width 1s'></div>"
+            f"<div style='position:absolute;left:{t * 100:.1f}%;top:-3px;width:2px;height:16px;background:#f5f5f5;border-radius:1px'></div>"
+            f"</div></div>")
 
 
 RASOUL_TITLE = "با کمک رسول واحد"   # PLACEHOLDER — منتظر املای نهایی مالک؛ فقط همین ثابت را عوض کنید
@@ -340,24 +347,28 @@ def advice_box(dec):
 
 
 def next_decision_preview(dec, now):
-    st.markdown(f"#### {T('pv_title')}")
     from core.exec_prob import exec_prob_default
-    st.caption(T("pv_note", p=exec_prob_default()))
-    if not dec.provisional:
-        st.caption(T("pv_none")); return
+    st.markdown(f"#### {T('pv_title')}")
+    thr = exec_prob_default()
+    st.caption(T("pv_note", p=thr))
+    if not dec.provisional:                           # کندل موقت نیست → همان تصمیم کندل بسته (عقربه هرگز ناپدید نمی‌شود)
+        st.caption(T("pv_none"))
     left = max(pd.Timedelta(0), dec.bar_close - now)
     pulse = float(np.clip(left.total_seconds() / 900, 0.5, 3.0))
+    pmax = max(dec.P_bull, dec.P_bear)
     c1, c2 = st.columns([1, 1])
     with c1:
-        st.markdown(preview_svg(dec.lean, dec.confidence, COL.get(dec.action, COL["WAIT"]), pulse), unsafe_allow_html=True)
+        st.markdown(preview_svg(dec.lean, pmax, COL.get(dec.action, COL["WAIT"]), pulse), unsafe_allow_html=True)
     with c2:
+        label = T('pv_label', t=f'{dec.bar_close.tz_convert(BERLIN):%H:%M}', m=int(left.total_seconds() // 60),
+                  s=int(left.total_seconds() % 60), n=max(0, int((now - dec.timestamp).total_seconds() // 60))) if dec.provisional else ""
         st.markdown(f"<div class='card' style='border:1px dashed {GOLD}88'>"
-                    f"<div style='font-size:1.5em;font-weight:800;color:{COL.get(dec.action, COL['WAIT'])}'>{dec.action} {max(dec.P_bull, dec.P_bear):.0%} · {T('pv_badge')}</div>"
-                    f"<div style='opacity:.85'>{T('pv_label', t=f'{dec.bar_close.tz_convert(BERLIN):%H:%M}', m=int(left.total_seconds() // 60), s=int(left.total_seconds() % 60), n=int((now - dec.timestamp).total_seconds() // 60))}</div>"
-                    + gate_bar("LONG · " + T("pv_bull"), dec.P_bull, dec.dominance_thr, COL["LONG"])
-                    + gate_bar("SHORT · " + T("pv_bear"), dec.P_bear, dec.dominance_thr, COL["SHORT"])
-                    + gate_bar(T("pv_doubt"), dec.doubt, dec.max_doubt, COL["WAIT"])
-                    + f"<div style='opacity:.75;font-size:.85em;margin-top:6px'>{dec.reason}</div></div>",
+                    f"<div style='font-size:1.4em;font-weight:800;color:{COL.get(dec.action, COL['WAIT'])}'>{dec.action} {pmax:.0%} · {T('pv_badge')}</div>"
+                    f"<div style='opacity:.85;font-size:.9em'>{label}</div>"
+                    + gate_bar("LONG · " + T("pv_bull"), dec.P_bull, thr, COL["LONG"])
+                    + gate_bar("SHORT · " + T("pv_bear"), dec.P_bear, thr, COL["SHORT"])
+                    + gate_bar(T("pv_doubt"), dec.doubt, dec.max_doubt, COL["WAIT"], invert=True)
+                    + f"<div style='opacity:.75;font-size:.85em;margin-top:6px' dir='auto'>{dec.reason}</div></div>",
                     unsafe_allow_html=True)
 
 
@@ -440,12 +451,22 @@ def live_panel():
     advice_box(dec)
     # ===== ۳) کارت تصمیم (از Decision.confirmed) =====
     card = signal_card(dec)
+    if not card and final_action in ("LONG", "SHORT"):             # اجرای احتمال: سطوح دقیق در Open کندل بعد (ATR)
+        cd = dec.confirmed or dec
+        a_ = float(feat["ATR"].iloc[-1]); d_ = 1 if final_action == "LONG" else -1
+        card = dict(action=final_action, entry=cd.entry, stop=cd.entry - d_ * a_ * cfg.organism.stop_atr_mult,
+                    target=cd.entry + d_ * a_ * cfg.organism.target_atr_mult, confidence=max(cd.P_bull, cd.P_bear),
+                    issued=cd.bar_close, expires=cd.bar_close + pd.Timedelta(hours=cd.interval_h))
+    if not card:
+        st.markdown(f"<div class='card decision-card' style='border:2px solid {COL['WAIT']}55;text-align:center'>"
+                    f"<div style='font-size:1.6em;font-weight:800;color:{COL['WAIT']}'>WAIT</div>"
+                    f"<div style='opacity:.8' dir='auto'>{reason_txt}</div></div>", unsafe_allow_html=True)
     if card:
         col = COL[card["action"]]
         lv = T("sig_levels", e=card["entry"], s=card["stop"], t=card["target"])
         meta = T("sig_meta", c=card["confidence"], iv=interval, t=f"{card['issued'].tz_convert(BERLIN):%Y-%m-%d %H:%M}",
                  x=f"{card['expires'].tz_convert(BERLIN):%H:%M}")
-        st.markdown(f"<div class='card' style='border:3px solid {col};background:{col}1f'>"
+        st.markdown(f"<div class='card decision-card' style='border:3px solid {col};background:{col}1f'>"
                     f"<div style='font-size:2em;font-weight:800;color:{col}'>{card['action']}</div>"
                     f"<div>{lv}</div><div style='opacity:.85'>{meta}</div></div>", unsafe_allow_html=True)
     # ===== ۴) قیمت (فقط PAXG) و حساب کاغذی =====
@@ -474,7 +495,10 @@ def live_panel():
                     f"{' · ' + T('manual_on') if manual else ''}</div></div>", unsafe_allow_html=True)
     # ===== ۶) پیش‌نمایش =====
     if awake:
-        next_decision_preview(dec, now)
+        try:
+            next_decision_preview(dec, now)
+        except Exception as e:                        # هرگز بی‌صدا ناپدید نشود
+            st.warning(f"preview: {type(e).__name__}: {e}")
     if cap.warning:
         st.warning(cap.warning)
     warning_box()
@@ -687,8 +711,68 @@ def colony_tab():
     st.write([e["e"] for e in d.get("events", [])[-15:]])
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def paxg_10m(days=2):
+    """PAXG-USD ۵ دقیقه‌ای → ۱۰ دقیقه‌ای (فقط کندل‌های بسته)."""
+    from core import gold_price
+    d = gold_price.candles("5m", int(days * 288))
+    return resample_10m(d)
+
+
+def resample_10m(d):
+    if d is None or d.empty:
+        return d
+    r = d.resample("10min", label="left", closed="left").agg(dict(Open="first", High="max", Low="min", Close="last", Volume="sum"))
+    return r.dropna(subset=["Open"])
+
+
+def paxg_candle_figure(c10, state=None):
+    """کندل ۱۰ دقیقه‌ای PAXG + ورود/خروج معاملات کاغذی زنده و SL/TP پوزیشن باز."""
+    fig = go.Figure(go.Candlestick(x=c10.index, open=c10.Open, high=c10.High, low=c10.Low, close=c10.Close, name="PAXG-USD 10m",
+                                   increasing_line_color=COL["LONG"], decreasing_line_color=COL["SHORT"]))
+    state = state or {}
+    t0 = c10.index[0] if len(c10) else None
+    tz = c10.index.tz if len(c10) else None
+    for tr in state.get("trades", []):
+        try:
+            et = pd.Timestamp(tr["entry_time"]).tz_convert(tz); xt = pd.Timestamp(tr["exit_time"]).tz_convert(tz)
+        except Exception:
+            continue
+        if t0 is None or xt < t0:
+            continue
+        col = COL["LONG"] if tr["direction"] == "LONG" else COL["SHORT"]
+        fig.add_trace(go.Scatter(x=[et, xt], y=[tr["entry"], tr["exit"]], mode="lines+markers", showlegend=False,
+                                 line=dict(color=col, dash="dot"), marker=dict(size=9, symbol=["triangle-up" if tr["direction"] == "LONG" else "triangle-down", "x"]),
+                                 hovertext=[f"{tr['direction']} entry {tr['entry']} · SL {tr.get('stop')} · TP {tr.get('target')} · {tr.get('exec_by', '')}",
+                                            f"exit {tr['exit']} ({tr.get('reason')}) {tr.get('pnl'):+}$"]))
+    pos = state.get("position")
+    if pos:
+        col = COL["LONG"] if pos["direction"] > 0 else COL["SHORT"]
+        fig.add_hline(y=pos["entry"], line=dict(color=col, width=2), annotation_text="entry")
+        fig.add_hline(y=pos["stop"], line=dict(color=COL["SHORT"], dash="dash"), annotation_text="SL")
+        fig.add_hline(y=pos["target"], line=dict(color=COL["LONG"], dash="dash"), annotation_text="TP")
+    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=8, r=8, t=30, b=8), xaxis_rangeslider_visible=False,
+                      title="PAX Gold (PAXG-USD) · 10m", showlegend=False)
+    return fig
+
+
+def paxg_chart_section():
+    from core.live_account import DATA_DIR
+    try:
+        c10 = paxg_10m()
+        if c10 is None or c10.empty:
+            return
+        c10.index = c10.index.tz_convert(BERLIN)
+        p = DATA_DIR / "live_account_gold.json"
+        state = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        st.plotly_chart(paxg_candle_figure(c10, state), width="stretch")
+    except Exception as e:
+        st.caption(f"PAXG 10m chart: {type(e).__name__}: {e}")
+
+
 live_panel()
 dashboard()
+paxg_chart_section()
 st.sidebar.markdown("---")
 st.sidebar.caption(CREDIT[L])
 credit_footer()
