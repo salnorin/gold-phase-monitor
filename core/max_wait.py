@@ -58,3 +58,35 @@ def step_wait(state, action, P_bull, P_bear, market_open, flat, reason, wp, cycl
         state["wait_count"] = 0
         return side, "forced"
     return action, None
+
+
+def apply_max_wait(acc, dec, cfg, action, exec_by, wp, now=None):
+    """گام انقضای انتظار روی حساب زنده — مشترک بین core.recorder و Streamlit.
+    now=None: هر فراخوانی = ۱ دور (ضبط‌کننده‌ی ۶۰ ثانیه‌ای). now داده شود: دورها از ساعت دیواری (دقیقه‌های گذشته
+    از آخرین شمارش) — برای Streamlit که هر ۱۵ ثانیه اجرا می‌شود. برمی‌گرداند (action, exec_by, forced)."""
+    import pandas as pd
+    c = dec.confirmed or dec
+    cycles = 1
+    if now is not None:
+        now = pd.Timestamp(now)
+        last = acc.state.get("wait_ts")
+        if last is None:
+            acc.state["wait_ts"] = str(now); cycles = 0
+        else:
+            cycles = int((now - pd.Timestamp(last)).total_seconds() // 60)
+            if cycles >= 1:
+                acc.state["wait_ts"] = str(pd.Timestamp(last) + pd.Timedelta(minutes=cycles))
+    flat = acc.state["position"] is None and not acc.state.get("pending")
+    if cycles == 0 and action == "WAIT":
+        return action, exec_by, None
+    action, forced = step_wait(acc.state, action, c.P_bull, c.P_bear, not dec.asleep, flat, c.reason, wp,
+                               cycles=max(1, cycles), killed=acc.equity <= cfg.kill_equity)
+    return action, (forced or exec_by), forced
+
+
+def queue_forced(acc, cfg, dec, action):
+    """ورود اجباری وقتی کندل جدیدی نیامده: در Open کندل بعد (SL/TP بر اساس ATR در همان لحظه)."""
+    c = dec.confirmed or dec
+    if acc.state["position"] is None and not acc.state.get("pending"):
+        acc.state["pending"] = [1 if action == "LONG" else -1, float(min(cfg.max_risk, cfg.base_risk)),
+                                float(max(c.P_bull, c.P_bear)), "forced"]

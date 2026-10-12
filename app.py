@@ -395,8 +395,17 @@ def live_panel():
                            rr=MANUAL_TEST_RR if manual else None)
     from core.exec_prob import apply_exec_prob, exec_prob_default, live_action
     exec_thr = exec_prob_default()
-    final_action, _ = live_action(dec, exec_thr)
-    acc.update(feat, apply_exec_prob(j, exec_thr), awake, signal=final_action)
+    final_action, exec_by = live_action(dec, exec_thr)
+    from core.max_wait import WaitParams, apply_max_wait, queue_forced
+    wp = WaitParams.from_env(start=exec_thr)
+    if not manual:                                    # انقضای انتظار با ساعت دیواری (اجرای هر ۱۵ ثانیه ≠ دور)
+        final_action, exec_by, forced = apply_max_wait(acc, dec, cfg, final_action, exec_by, wp, now=now)
+    else:
+        forced = None
+    acc.update(feat, apply_exec_prob(j, exec_thr), awake, signal=final_action, signal_tag=exec_by or None)
+    if forced:
+        queue_forced(acc, cfg, dec, final_action)
+    acc.save()
     paxg = paxg_price()
     fut = float(mins["Close"].iloc[-1]) if mins is not None else None      # GC=F فقط مرجع
     price = paxg if paxg else dec.price
@@ -444,7 +453,9 @@ def live_panel():
         last_x = f"{r0['direction']} @ {float(r0['entry']):,.2f} · {str(r0['entry_time'])[:16]}"
     else:
         last_x = None
+    cdd = dec.confirmed or dec
     st.markdown(f"<div class='card' style='border:1px solid #22c55e88'><b>{T('auto_on', p=exec_thr)}</b><br>"
+                f"<span dir='ltr'>closed bar: LONG {cdd.P_bull:.0%} · SHORT {cdd.P_bear:.0%} · max-wait {acc.state.get('wait_count', 0)}/{wp.max_wait}</span><br>"
                 f"{T('last_exec', x=last_x) if last_x else T('last_exec_none')}</div>", unsafe_allow_html=True)
     auto_paper_panel(acc, price, cap, now)
     # ===== ۲) با کمک رسول واحد =====
@@ -712,62 +723,98 @@ def colony_tab():
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def paxg_10m(days=2):
-    """PAXG-USD ۵ دقیقه‌ای → ۱۰ دقیقه‌ای (فقط کندل‌های بسته)."""
+def paxg_1m_day():
+    """PAXG-USD ۱ دقیقه‌ای، تا ۲۴ ساعت اخیر (کندل‌های بسته)."""
     from core import gold_price
-    d = gold_price.candles("5m", int(days * 288))
-    return resample_10m(d)
+    return gold_price.candles("1m", 1440)
 
 
-def resample_10m(d):
-    if d is None or d.empty:
-        return d
-    r = d.resample("10min", label="left", closed="left").agg(dict(Open="first", High="max", Low="min", Close="last", Volume="sum"))
-    return r.dropna(subset=["Open"])
+MV = {"title": ("حرکت PAX Gold امروز (۱ دقیقه)", "PAX-Gold-Bewegung heute (1 min)", "PAX Gold movement today (1 min)"),
+      "title24": ("حرکت PAX Gold در ۲۴ ساعت اخیر (۱ دقیقه)", "PAX-Gold-Bewegung letzte 24 h (1 min)", "PAX Gold movement last 24 h (1 min)"),
+      "chg": ("از \u2066{a:,.2f}\u2069 به \u2066{b:,.2f}\u2069، \u2066{p:+.2%}\u2069", "von {a:,.2f} auf {b:,.2f}, {p:+.2%}", "from {a:,.2f} to {b:,.2f}, {p:+.2%}"),
+      "wait": ("\u2066{m}\u2069 دقیقه انتظار", "{m} Min gewartet", "waited {m} min"),
+      "touch": ("\u2066{n}×\u2069 برخورد", "{n}× berührt", "{n}× touched"),
+      "tap": ("دقیقه در قیمت", "Minuten je Preis", "minutes at price"),
+      "price": ("قیمت", "Preis", "price")}
 
 
-def paxg_candle_figure(c10, state=None):
-    """کندل ۱۰ دقیقه‌ای PAXG + ورود/خروج معاملات کاغذی زنده و SL/TP پوزیشن باز."""
-    fig = go.Figure(go.Candlestick(x=c10.index, open=c10.Open, high=c10.High, low=c10.Low, close=c10.Close, name="PAXG-USD 10m",
-                                   increasing_line_color=COL["LONG"], decreasing_line_color=COL["SHORT"]))
-    state = state or {}
-    t0 = c10.index[0] if len(c10) else None
-    tz = c10.index.tz if len(c10) else None
+def MT(k, **kw):
+    i = {"fa": 0, "de": 1, "en": 2}.get(L, 0)
+    return MV[k][i].format(**kw) if kw else MV[k][i]
+
+
+def movement_figure(df, mode, state=None):
+    """نمودار حرکت سفارشی (بدون کندل): خط قیمت + تغییر روز، نوارهای زمان-در-قیمت (هیستوگرام کنار)،
+    سطوح برخورد مکرر با تعداد، مناطق مکث با مدت، و نشانگرهای معاملات کاغذی زنده."""
+    from plotly.subplots import make_subplots
+    from core.movement import change, pause_zones, time_at_price, touch_levels
+    a, b, pct = change(df)
+    edges, cnt, bands = time_at_price(df["Close"])
+    levels = touch_levels(df)
+    pauses = pause_zones(df)
+    up = pct >= 0
+    lc = COL["LONG"] if up else COL["SHORT"]
+    fig = make_subplots(rows=1, cols=2, shared_yaxes=True, column_widths=[0.82, 0.18], horizontal_spacing=0.01)
+    x0, x1 = df.index[0], df.index[-1]
+    for lo, hi, m in bands:                                   # پربازدیدترین قیمت‌ها
+        fig.add_shape(type="rect", x0=x0, x1=x1, y0=lo, y1=hi, fillcolor=GOLD, opacity=0.10, line_width=0, row=1, col=1)
+    for z in pauses:                                          # مکث‌ها
+        fig.add_shape(type="rect", x0=z["start"], x1=z["end"], y0=z["lo"], y1=z["hi"], fillcolor="#60a5fa", opacity=0.18,
+                      line=dict(color="#60a5fa", width=1), row=1, col=1)
+        fig.add_annotation(x=z["start"] + (z["end"] - z["start"]) / 2, y=z["hi"], text=MT("wait", m=z["minutes"]),
+                           showarrow=False, yshift=9, font=dict(size=10, color="#93c5fd"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df["Close"], mode="lines", line=dict(color=lc, width=2), name=MT("price"),
+                             hovertemplate="%{x|%H:%M} · %{y:,.2f}<extra></extra>"), row=1, col=1)
+    for lv in levels:                                         # حمایت/مقاومت
+        col = COL["LONG"] if lv["kind"] == "S" else COL["SHORT"]
+        fig.add_hline(y=lv["price"], line=dict(color=col, width=1.2, dash="dot"), row=1, col=1)
+        fig.add_annotation(x=x0, y=lv["price"], xanchor="left", text=f"{lv['price']:,.2f} · {MT('touch', n=lv['touches'])}",
+                           showarrow=False, yshift=8, font=dict(size=10, color=col), row=1, col=1)
+    mids = (edges[:-1] + edges[1:]) / 2
+    fig.add_trace(go.Bar(x=cnt, y=mids, orientation="h", marker_color=GOLD, opacity=0.6, name=MT("tap"),
+                         hovertemplate="%{y:,.2f} · %{x} min<extra></extra>"), row=1, col=2)
+    state = state or {}                                       # معاملات کاغذی زنده
+    tz = df.index.tz
     for tr in state.get("trades", []):
         try:
-            et = pd.Timestamp(tr["entry_time"]).tz_convert(tz); xt = pd.Timestamp(tr["exit_time"]).tz_convert(tz)
+            et, xt = pd.Timestamp(tr["entry_time"]).tz_convert(tz), pd.Timestamp(tr["exit_time"]).tz_convert(tz)
         except Exception:
             continue
-        if t0 is None or xt < t0:
+        if xt < x0:
             continue
-        col = COL["LONG"] if tr["direction"] == "LONG" else COL["SHORT"]
-        fig.add_trace(go.Scatter(x=[et, xt], y=[tr["entry"], tr["exit"]], mode="lines+markers", showlegend=False,
-                                 line=dict(color=col, dash="dot"), marker=dict(size=9, symbol=["triangle-up" if tr["direction"] == "LONG" else "triangle-down", "x"]),
-                                 hovertext=[f"{tr['direction']} entry {tr['entry']} · SL {tr.get('stop')} · TP {tr.get('target')} · {tr.get('exec_by', '')}",
-                                            f"exit {tr['exit']} ({tr.get('reason')}) {tr.get('pnl'):+}$"]))
+        c = COL["LONG"] if tr["direction"] == "LONG" else COL["SHORT"]
+        fig.add_trace(go.Scatter(x=[et, xt], y=[tr["entry"], tr["exit"]], mode="lines+markers", line=dict(color=c, dash="dot"),
+                                 marker=dict(size=9, symbol=["triangle-up" if tr["direction"] == "LONG" else "triangle-down", "x"]),
+                                 hovertext=[f"{tr['direction']} {tr['entry']} · SL {tr.get('stop')} · TP {tr.get('target')} · {tr.get('exec_by', '')}",
+                                            f"exit {tr['exit']} ({tr.get('reason')})"], hoverinfo="text"), row=1, col=1)
     pos = state.get("position")
     if pos:
-        col = COL["LONG"] if pos["direction"] > 0 else COL["SHORT"]
-        fig.add_hline(y=pos["entry"], line=dict(color=col, width=2), annotation_text="entry")
-        fig.add_hline(y=pos["stop"], line=dict(color=COL["SHORT"], dash="dash"), annotation_text="SL")
-        fig.add_hline(y=pos["target"], line=dict(color=COL["LONG"], dash="dash"), annotation_text="TP")
-    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=8, r=8, t=30, b=8), xaxis_rangeslider_visible=False,
-                      title="PAX Gold (PAXG-USD) · 10m", showlegend=False)
+        c = COL["LONG"] if pos["direction"] > 0 else COL["SHORT"]
+        for y, name, cc, dash in ((pos["entry"], "entry", c, "solid"), (pos["stop"], "SL", COL["SHORT"], "dash"),
+                                  (pos["target"], "TP", COL["LONG"], "dash")):
+            fig.add_hline(y=y, line=dict(color=cc, width=1.5, dash=dash), annotation_text=name, row=1, col=1)
+    title = MT("title" if mode == "today" else "title24")
+    fig.update_layout(template="plotly_dark", height=420, margin=dict(l=6, r=6, t=56, b=6), showlegend=False,
+                      title=dict(text=f"{title}<br><span style='font-size:13px;color:{lc}'>{MT('chg', a=a, b=b, p=pct)}</span>",
+                                 x=0.5, xanchor="center"), bargap=0.05, hovermode="x unified")
+    fig.update_xaxes(tickformat="%H:%M", row=1, col=1)
+    fig.update_xaxes(showticklabels=False, row=1, col=2)
     return fig
 
 
 def paxg_chart_section():
     from core.live_account import DATA_DIR
+    from core.movement import day_window
     try:
-        c10 = paxg_10m()
-        if c10 is None or c10.empty:
+        m1 = paxg_1m_day()
+        df, mode = day_window(m1)
+        if df is None or len(df) < 10:
             return
-        c10.index = c10.index.tz_convert(BERLIN)
         p = DATA_DIR / "live_account_gold.json"
         state = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-        st.plotly_chart(paxg_candle_figure(c10, state), width="stretch")
+        st.plotly_chart(movement_figure(df, mode, state), width="stretch", config={"displayModeBar": False})
     except Exception as e:
-        st.caption(f"PAXG 10m chart: {type(e).__name__}: {e}")
+        st.caption(f"PAXG movement chart: {type(e).__name__}: {e}")
 
 
 live_panel()

@@ -22,13 +22,7 @@ def test_app_renders_without_exception():
         assert "linearGradient" in md and "decision-card" in md and "#### 🔮" in md
 
 
-def test_paxg_10m_resample_and_trade_marks():
-    import numpy as np
-    import pandas as pd
+
+def test_movement_chart_wired():
     src = open(APP, encoding="utf-8").read()
-    assert "def resample_10m" in src and "paxg_chart_section()" in src
-    # resample logic (same code as app) without importing streamlit app module
-    idx = pd.date_range("2026-10-12 00:00", periods=12, freq="5min", tz="UTC")
-    d = pd.DataFrame(dict(Open=np.arange(12.), High=np.arange(12.) + 1, Low=np.arange(12.) - 1, Close=np.arange(12.) + .5, Volume=1.0), index=idx)
-    r = d.resample("10min", label="left", closed="left").agg(dict(Open="first", High="max", Low="min", Close="last", Volume="sum"))
-    assert len(r) == 6 and r.Open.iloc[1] == 2 and r.High.iloc[1] == 4 and r.Close.iloc[1] == 3.5
+    assert "def movement_figure" in src and "paxg_chart_section()" in src and "Candlestick" not in src

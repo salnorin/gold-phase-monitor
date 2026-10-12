@@ -104,3 +104,22 @@ def test_forced_never_reverses_open_position(tmp_path):
     j["exec_by"] = ["organism", "", "forced", ""]
     acc.update(f, j, True)
     assert acc.state["position"]["direction"] == 1 and len(acc.trades_frame()) == 0
+
+
+def test_streamlit_clock_max_wait_forces_and_queues(tmp_path):
+    from core.max_wait import apply_max_wait, queue_forced
+    f = _feat([4000] * 3)
+    acc = _acc(tmp_path, f)
+    dec = D(P_bull=0.51, P_bear=0.13, reason="احتیاط: ردپای نهنگ")
+    wp = WaitParams(max_wait=23)
+    t0 = pd.Timestamp("2026-10-12 03:00", tz="UTC")
+    assert apply_max_wait(acc, dec, acc.cfg, "WAIT", "", wp, now=t0)[2] is None               # starts clock
+    for s in range(1, 4):                                                                      # 15-s reruns don't count
+        apply_max_wait(acc, dec, acc.cfg, "WAIT", "", wp, now=t0 + pd.Timedelta(seconds=15 * s))
+    assert acc.state.get("wait_count", 0) == 0
+    a, tag, forced = apply_max_wait(acc, dec, acc.cfg, "WAIT", "", wp, now=t0 + pd.Timedelta(minutes=25))
+    assert forced is None and acc.state["wait_count"] == 25                                    # thr 0.53 > 0.51
+    a, tag, forced = apply_max_wait(acc, dec, acc.cfg, "WAIT", "", wp, now=t0 + pd.Timedelta(minutes=28))
+    assert (a, forced) == ("LONG", "forced") and acc.state["wait_count"] == 0                  # thr 0.50 floor → higher side
+    queue_forced(acc, acc.cfg, dec, a)
+    assert acc.state["pending"][0] == 1 and acc.state["pending"][3] == "forced"

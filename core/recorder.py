@@ -71,19 +71,13 @@ def cycle(acc_kw=None, interval="1h", leverage=20.0, db=None, profile=None, mom=
         from core.exec_prob import apply_exec_prob, exec_prob_default, live_action
         thr = exec_prob_default(exec_prob)
         action, exec_by = live_action(dec, thr)
-        from core.max_wait import WaitParams, step_wait
-        c = dec.confirmed or dec
+        from core.max_wait import WaitParams, apply_max_wait, queue_forced
         wp = wait or WaitParams.from_env(start=thr)
-        action, forced = step_wait(acc.state, action, c.P_bull, c.P_bear, not dec.asleep,
-                                   acc.state["position"] is None and not acc.state.get("pending"), c.reason, wp,
-                                   killed=acc.equity <= cfg.kill_equity)
-        exec_by = forced or exec_by
+        action, exec_by, forced = apply_max_wait(acc, dec, cfg, action, exec_by, wp)
         n = acc.update(ctx["feat"], apply_exec_prob(ctx["journal"], thr), not dec.asleep, signal=action,
                        signal_tag=exec_by or None)
-        if forced and acc.state["position"] is None and not acc.state.get("pending"):
-            # کندل جدیدی نیامده (update کاری نکرد) → ورود اجباری در Open کندل بعدی
-            acc.state["pending"] = [1 if action == "LONG" else -1, float(min(cfg.max_risk, cfg.base_risk)),
-                                    float(max(c.P_bull, c.P_bear)), "forced"]
+        if forced:
+            queue_forced(acc, cfg, dec, action)            # کندل جدیدی نیامده → ورود در Open کندل بعد
         acc.save()
         why = gate_breakdown(dec, ctx, cfg, raw, profile)
         why.update(action=action, exec_by=exec_by, exec_prob=thr, wait_count=acc.state.get("wait_count", 0),
