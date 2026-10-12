@@ -168,3 +168,19 @@ tmux attach -t gold                       # خروج بدون توقف: Ctrl+B �
 ```
 
 هر کلون پوشه‌ی دیتای خودش را دارد: `~/.local/share/gold-phase-monitor/<name>/` (فایل JSON حساب، SQLite و پورت). ضبط‌کننده هم مستقیماً می‌پذیرد: `python -m core.recorder --data-dir DIR` و `--db PATH`. فقط معاملات کاغذی؛ هیچ سفارش واقعی.
+
+### «چرا WAIT؟» و پروفایل‌ها
+
+ضبط‌کننده در هر دور دلیل تصمیم را (JSON در ستون `reason` جدول `ticks`) ذخیره می‌کند و داشبورد آن را در کادر «چرا این تصمیم؟» نشان می‌دهد
+(حرکت قیمت ۶۰ دقیقه/۲۴ ساعت، توافق ارگان‌ها، اطمینان، انرژی، غلبه‌ی حالت، تردید، نهنگ، اکسیژن، نوسان، استراحت). «خنثی» در کارت موفقیت فقط یعنی هنوز معامله‌ای بسته نشده.
+
+```
+python -m core.recorder --once --explain                 # چاپ کامل دروازه‌ها
+python -m core.recorder --profile strict                 # normal (پیش‌فرض، بدون تغییر) | strict | active
+python -m core.recorder --profile active --mom-bars 4 --mom-pct 0.3   # یا env: GOLD_PROFILE / GOLD_MOM_BARS / GOLD_MOM_PCT
+./scripts/clone_gold.sh gold-a:normal gold-s:strict gold-m:active
+python -m core.profile_backtest                          # مقایسه‌ی پروفایل‌ها روی تاریخچه‌ی PAXG
+```
+
+`active` = مومنتوم: LONG اگر بازده N کندل > +x٪، SHORT اگر < −x٪، وگرنه WAIT؛ با همان SL/TP، کارمزد و ریسک ۱٪. در بک‌تست ۶ ماه اخیر زیان‌ده بوده؛ فقط برای آزمون کاغذی.
+برای هر پروفایل یک کلون جدا (پوشه‌ی دیتای جدا) بسازید تا حساب‌های کاغذی قاطی نشوند.

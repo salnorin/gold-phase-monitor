@@ -43,7 +43,14 @@ def load_state(db):
             out.update(start_equity=st.get("start_equity"), equity=st.get("equity"), position=st.get("position"))
         except Exception:
             pass
+    for t in out["ticks"]:
+        if isinstance(t.get("reason"), str):
+            try:
+                t["reason"] = json.loads(t["reason"])
+            except ValueError:
+                t["reason"] = None
     out["latest"] = out["ticks"][-1] if out["ticks"] else None
+    out["why"] = (out["latest"] or {}).get("reason")
     pnl = [float(t["pnl"] or 0) for t in out["trades"]]
     n, wins = len(pnl), sum(1 for p in pnl if p > 0)
     s0 = out["start_equity"]
@@ -76,6 +83,10 @@ table{width:100%;border-collapse:collapse;font-size:.85em}td,th{padding:4px;bord
  <div><div class="k" data-t="equity"></div><div class="v">{{ fmt(st.equity) }} $</div></div>
  <div><div class="k" data-t="updated"></div><div>{{ latest.time[:19] if latest else '—' }}</div></div>
 </div>
+<div class="card"><b data-t="why"></b>{% if why and why.profile %} <span class="k">[{{ why.profile }}]</span>{% endif %}
+<ul id="why" style="margin:6px 0;padding-inline-start:18px"></ul>
+<div class="k" data-t="neutral_note"></div></div>
+<script>const WHY={{ why_json|safe }};</script>
 <div class="card {{ st.mood }}"><b data-t="success"></b> — <span data-t="{{ st.mood }}"></span>
 <div class="grid">
  <div><div class="k" data-t="start"></div><div class="v">{{ fmt(st.start) }} $</div></div>
@@ -98,20 +109,31 @@ table{width:100%;border-collapse:collapse;font-size:.85em}td,th{padding:4px;bord
 {% if not exists %}<div class="card neg">DB: {{ db }} — <span data-t="nodb"></span></div>{% endif %}
 <div class="credit">{{ credit }}</div>
 <script>
-const T={fa:{title:"ارگانیسم طلا",price:"قیمت PAXG",decision:"تصمیم",equity:"سرمایه",updated:"به‌روزرسانی",success:"کارت موفقیت",
+const T={fa:{why:"چرا این تصمیم؟",neutral_note:"«خنثی» در کارت موفقیت یعنی هنوز هیچ معامله‌ای بسته نشده؛ تصمیم جداست.",nowhy:"هنوز دلیلی ثبت نشده (ضبط‌کننده‌ی جدید را اجرا کنید)",move_1h:"قیمت {v} در ۶۰ دقیقه‌ی اخیر",move_24h:"قیمت {v} در ۲۴ ساعت اخیر",market:"بازار: {v}",organ_score:"توافق ارگان‌ها {v} {op} {thr} لازم",confidence:"اطمینان {v} {op} {thr} لازم",energy:"انرژی (ATP) {v} {op} {thr}",stress:"استرس {v} (سقف {thr})",dominance:"غلبه‌ی حالت {v} {op} {thr} لازم",doubt:"تردید {v} (سقف {thr})",whale:"ردپای نهنگ در {v} کندل اخیر (احتیاط {thr} کندل)",volatility:"نوسان {v}× عادی (سقف {thr})",cooldown:"استراحت اجباری",in_position:"در پوزیشن",oxygen:"اکسیژن/نقدینگی {v} (کف {thr})",momentum:"بازده {n} کندل {v} (آستانه ±{thr})",okw:"✅",bad:"⛔",title:"ارگانیسم طلا",price:"قیمت PAXG",decision:"تصمیم",equity:"سرمایه",updated:"به‌روزرسانی",success:"کارت موفقیت",
 bull:"گاوی (سود)",bear:"خرسی (زیان)",neutral:"خنثی",start:"سرمایه‌ی شروع",winrate:"نرخ برد",trades:"معاملات",open:"پوزیشن باز",
 none:"ندارد",chart:"نمودار",dir:"جهت",entry_t:"ورود",exit_t:"خروج",entry:"قیمت ورود",exit:"قیمت خروج",reason:"دلیل",
 notrades:"هنوز معامله‌ای بسته نشده",nodb:"فایل پیدا نشد؛ اول core.recorder را اجرا کنید"},
-de:{title:"Gold-Organismus",price:"PAXG-Preis",decision:"Entscheidung",equity:"Kapital",updated:"Aktualisiert",success:"Erfolgskarte",
+de:{why:"Warum diese Entscheidung?",neutral_note:"„Neutral“ auf der Erfolgskarte heißt: noch kein geschlossener Trade; die Entscheidung ist davon getrennt.",nowhy:"Noch kein Grund gespeichert (neuen Recorder starten)",move_1h:"Preis {v} in den letzten 60 Min",move_24h:"Preis {v} in 24 Std",market:"Markt: {v}",organ_score:"Organ-Einigkeit {v} {op} {thr} nötig",confidence:"Konfidenz {v} {op} {thr} nötig",energy:"Energie (ATP) {v} {op} {thr}",stress:"Stress {v} (max {thr})",dominance:"Regime-Dominanz {v} {op} {thr} nötig",doubt:"Zweifel {v} (max {thr})",whale:"Wal-Spur in {v} der letzten Kerzen (Vorsicht {thr})",volatility:"Volatilität {v}× normal (max {thr})",cooldown:"Zwangspause",in_position:"In Position",oxygen:"Liquidität {v} (min {thr})",momentum:"Rendite über {n} Kerzen {v} (Schwelle ±{thr})",okw:"✅",bad:"⛔",title:"Gold-Organismus",price:"PAXG-Preis",decision:"Entscheidung",equity:"Kapital",updated:"Aktualisiert",success:"Erfolgskarte",
 bull:"Bulle (Gewinn)",bear:"Bär (Verlust)",neutral:"Neutral",start:"Startkapital",winrate:"Trefferquote",trades:"Trades",open:"Offene Position",
 none:"keine",chart:"Diagramm",dir:"Richtung",entry_t:"Einstieg",exit_t:"Ausstieg",entry:"Einstiegspreis",exit:"Ausstiegspreis",reason:"Grund",
 notrades:"Noch keine geschlossenen Trades",nodb:"Datei fehlt; zuerst core.recorder starten"},
-en:{title:"Gold Organism",price:"PAXG price",decision:"Decision",equity:"Equity",updated:"Updated",success:"Success card",
+en:{why:"Why this decision?",neutral_note:"\"Neutral\" on the success card just means no closed trades yet; the decision is separate.",nowhy:"No reason logged yet (run the new recorder)",move_1h:"price {v} in last 60 min",move_24h:"price {v} in last 24 h",market:"market: {v}",organ_score:"organ agreement {v} {op} {thr} needed",confidence:"confidence {v} {op} {thr} needed",energy:"energy (ATP) {v} {op} {thr}",stress:"stress {v} (max {thr})",dominance:"regime dominance {v} {op} {thr} needed",doubt:"doubt {v} (max {thr})",whale:"whale footprint in {v} recent bars (caution {thr})",volatility:"volatility {v}× normal (max {thr})",cooldown:"forced rest",in_position:"in position",oxygen:"oxygen/liquidity {v} (floor {thr})",momentum:"{n}-bar return {v} (threshold ±{thr})",okw:"✅",bad:"⛔",title:"Gold Organism",price:"PAXG price",decision:"Decision",equity:"Equity",updated:"Updated",success:"Success card",
 bull:"Bull (profit)",bear:"Bear (loss)",neutral:"Neutral",start:"Start capital",winrate:"Win rate",trades:"Trades",open:"Open position",
 none:"none",chart:"Chart",dir:"Dir",entry_t:"Entry time",exit_t:"Exit time",entry:"Entry",exit:"Exit",reason:"Reason",
 notrades:"No closed trades yet",nodb:"File not found; run core.recorder first"}};
 function L(l){localStorage.lang=l;document.documentElement.lang=l;document.documentElement.dir=l=="fa"?"rtl":"ltr";
 document.querySelectorAll("[data-t]").forEach(e=>{e.textContent=T[l][e.dataset.t]??e.dataset.t})}
+function pct(x){return (x>=0?"+":"")+(x*100).toFixed(2)+"%"}
+function W(l){const u=document.getElementById("why");if(!u)return;u.innerHTML="";
+if(!WHY||!WHY.items){u.innerHTML="<li>"+T[l].nowhy+"</li>";return}
+const top=document.createElement("li");top.textContent=WHY.action+" — "+(WHY.reason||"");u.appendChild(top);
+for(const it of WHY.items){let tpl=T[l][it.k];if(!tpl)continue;
+ const isP=["move_1h","move_24h","momentum"].includes(it.k);
+ const v=it.v==null?"—":(isP?pct(it.v):it.v),thr=it.thr==null?"":(it.k=="momentum"?(it.thr*100).toFixed(2)+"%":it.thr);
+ const op=it.ok?"≥":"<";
+ const li=document.createElement("li");li.textContent=(it.ok?"":"⛔ ")+tpl.replace("{v}",v).replace("{thr}",thr).replace("{op}",op).replace("{n}",it.n||"");
+ if(!it.ok)li.className="neg";u.appendChild(li)}}
+const _L=L;L=function(l){_L(l);W(l)};
 L(localStorage.lang||"fa");
 </script></body></html>"""
 
@@ -157,7 +179,8 @@ def create_app(db=None):
     def index():
         s = load_state(app.config["DB"])
         return render_template_string(PAGE, latest=_ns(s["latest"]), st=_ns(s["stats"]), pos=_ns(s["position"]),
-                                      trades=[_ns(t) for t in s["trades"]], svg=svg_chart(s["ticks"]),
+                                      trades=[_ns(t) for t in s["trades"]], svg=svg_chart(s["ticks"]), why=_ns(s["why"]),
+                                      why_json=json.dumps(s["why"], ensure_ascii=False).replace("</", "<\\/"),
                                       exists=s["exists"], db=s["db"], credit=CREDIT, fmt=_fmt)
 
     return app

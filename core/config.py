@@ -59,3 +59,29 @@ class OrganismConfig:
 
 
 DEFAULT_CONFIG = OrganismConfig()
+
+
+# ---- پروفایل‌های ضبط‌کننده (core.recorder --profile / env GOLD_PROFILE) — پیش‌فرض normal = همان ارگانیسم بدون تغییر ----
+@dataclass
+class MomentumParams:
+    bars: int = 4          # N کندل (env GOLD_MOM_BARS)
+    pct: float = 0.30      # x درصد (env GOLD_MOM_PCT)
+
+
+PROFILES = {
+    "normal": {},                                         # ارگانیسم پیش‌فرض، دست‌نخورده
+    "strict": dict(dominance=0.62, max_doubt=0.50),       # سخت‌گیرتر از پیش‌فرض
+    "active": dict(base_risk=MAX_RISK_PER_TRADE),         # مومنتوم؛ ریسک ۱٪، همان SL/TP/کارمزد
+}
+
+
+def profile_overrides(name):
+    if name not in PROFILES:
+        raise ValueError(f"unknown profile {name!r}; choose {', '.join(PROFILES)}")
+    return dict(PROFILES[name])
+
+
+def momentum_params(bars=None, pct=None):
+    import os
+    return MomentumParams(bars=int(bars if bars is not None else os.getenv("GOLD_MOM_BARS", 4)),
+                          pct=float(pct if pct is not None else os.getenv("GOLD_MOM_PCT", 0.30)))
